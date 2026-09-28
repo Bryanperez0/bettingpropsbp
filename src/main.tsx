@@ -9,8 +9,8 @@ import { reloadOnce } from "./components/ErrorBoundary";
 // After a new deploy, an open tab can request page files that no longer
 // exist. Vite reports that here; reload once to get the new version.
 window.addEventListener("vite:preloadError", (event) => {
-  event.preventDefault();
-  reloadOnce();
+  // Only swallow the error if we're reloading; otherwise let it surface.
+  if (reloadOnce()) event.preventDefault();
 });
 
 const queryClient = new QueryClient({

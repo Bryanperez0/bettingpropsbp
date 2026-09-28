@@ -15,6 +15,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
 
   componentDidCatch(error: Error) {
     console.error("Page crashed:", error);
+    (window as unknown as { __showFatal?: (m: string) => void }).__showFatal?.(`Page error: ${error.message}`);
     if (isChunkError(error)) reloadOnce();
   }
 
@@ -40,15 +41,19 @@ export function isChunkError(e: unknown): boolean {
   return /dynamically imported module|Importing a module script failed|error loading dynamically|ChunkLoadError|Failed to fetch/i.test(msg);
 }
 
-/** Reload once to pick up the new deploy; the guard prevents reload loops. */
-export function reloadOnce() {
+/**
+ * Reload once to pick up the new deploy; the guard prevents reload loops.
+ * Returns false when it did NOT reload (so the error should surface).
+ */
+export function reloadOnce(): boolean {
   try {
     const key = "chunk-reload-at";
     const last = Number(sessionStorage.getItem(key) ?? 0);
-    if (Date.now() - last < 30_000) return;
+    if (Date.now() - last < 30_000) return false;
     sessionStorage.setItem(key, String(Date.now()));
   } catch {
-    /* storage blocked: still reload */
+    return false; // storage blocked: can't guard against loops, so don't reload
   }
   window.location.reload();
+  return true;
 }

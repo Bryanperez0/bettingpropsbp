@@ -10,6 +10,44 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <script>
+      // Last-resort error display: if anything fails outside React (script
+      // loading, browser-specific errors), show it on screen instead of a
+      // blank page, so it can be screenshotted and diagnosed.
+      (function () {
+        var shown = {};
+        function show(msg) {
+          if (!msg || shown[msg]) return;
+          shown[msg] = 1;
+          var box = document.getElementById("fatal-errors");
+          if (!box) {
+            box = document.createElement("div");
+            box.id = "fatal-errors";
+            box.setAttribute("role", "alert");
+            box.style.cssText = "position:fixed;left:12px;right:12px;bottom:12px;z-index:9999;max-height:40vh;overflow:auto;background:#2a1215;color:#fecaca;border:1px solid #f87171;border-radius:10px;padding:12px;font:13px/1.4 system-ui,sans-serif";
+            box.innerHTML = "<b>Something went wrong loading this page.</b> Please screenshot this box.<br>";
+            document.body.appendChild(box);
+          }
+          var line = document.createElement("div");
+          line.style.marginTop = "6px";
+          line.textContent = "[" + location.pathname + "] " + msg + "  (" + navigator.userAgent.replace(/^.*?(Chrome\/[\d.]+|Version\/[\d.]+ Safari|Firefox\/[\d.]+).*$/, "$1") + ")";
+          box.appendChild(line);
+        }
+        window.addEventListener("error", function (e) {
+          if (e.target && e.target !== window && (e.target.src || e.target.href)) {
+            var url = e.target.src || e.target.href;
+            if (/\/assets\//.test(url)) show("Failed to load file: " + url);
+            return;
+          }
+          show(e.message + (e.filename ? " @ " + e.filename.split("/").pop() + ":" + e.lineno : ""));
+        }, true);
+        window.addEventListener("unhandledrejection", function (e) {
+          var r = e.reason;
+          show("Unhandled: " + (r && (r.stack || r.message) ? String(r.message || r).slice(0, 300) : String(r)));
+        });
+        window.__showFatal = show;
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
