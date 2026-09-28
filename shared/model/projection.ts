@@ -1,6 +1,6 @@
 import type { PlayerGameLog, ProjectionStep, PropMarket, StatLine, WeatherInfo, AnalyzedProp } from "../types";
 import { MARKETS, positionGroup } from "./markets";
-import { defenseRank, POS_COVERAGE_MIN, type LeagueContext, type PosKey, type TeamProfile } from "./league";
+import { defenseRank, posVal, POS_COVERAGE_MIN, type LeagueContext, type PosKey, type TeamProfile } from "./league";
 import { clamp, mean, round, shrinkRatio, shrinkTo, stdev, sum } from "./stats";
 
 /**
@@ -270,7 +270,7 @@ export function project(input: ProjectionInput): ProjectionResult {
   const oppRatio = (o: number | null, l: number | null, k = 4, lo = 0.85, hi = 1.15) =>
     o === null || l === null || l === 0 ? 1 : shrinkRatio(o / l, oppGames, k, lo, hi);
   const pushMatch = (label: string, o: number | null, l: number | null, metric: (p: TeamProfile) => number | null, factor: number | null, note: string, digits = 1) => {
-    const r = L ? defenseRank(L, input.opponent, metric) : null;
+    const r = L && o !== null ? defenseRank(L, input.opponent, metric) : null;
     matchup.push({ label, value: f1(o, digits), leagueValue: f1(l, digits), factor, rank: r?.rank ?? null, rankOf: r?.of ?? 32, note });
   };
 
@@ -326,7 +326,7 @@ export function project(input: ProjectionInput): ProjectionResult {
       projected = projCarries * ypc * effM * ha.factor;
       factors = { matchup: volM * effM, script: script.factor, weather: wx.factor, homeAway: ha.factor, injury: inj.factor };
       pushMatch("YPC allowed", oppYpc, lgYpc, (p) => (p.rushAtt ? p.rushYds / p.rushAtt : null), effM, "Efficiency factor applied", 2);
-      if (posOk) pushMatch("RB rush yds allowed/g", oppD!.pos.RB.rushYds, lg!.pos.RB.rushYds, (p) => p.pos.RB.rushYds, null, "Context only");
+      if (posOk) pushMatch("RB rush yds allowed/g", oppD!.pos.RB.rushYds, lg!.pos.RB.rushYds, (p) => posVal(p, (x) => x.RB.rushYds), null, "Context only");
     }
   }
 
@@ -356,8 +356,8 @@ export function project(input: ProjectionInput): ProjectionResult {
     const lgCatch = lP && lP.targets > 0 ? lP.rec / lP.targets : null;
     const oppYpt = oP && oP.targets > 0 ? oP.recYds / oP.targets : null;
     const oppCatch = oP && oP.targets > 0 ? oP.rec / oP.targets : null;
-    pushMatch(`${posKey} rec yds allowed/g`, oP?.recYds ?? null, lP?.recYds ?? null, (p) => p.pos[posKey].recYds, null, "Rank 1 = fewest allowed");
-    pushMatch(`${posKey} targets allowed/g`, oP?.targets ?? null, lP?.targets ?? null, (p) => p.pos[posKey].targets, tM, "Volume factor applied");
+    pushMatch(`${posKey} rec yds allowed/g`, oP?.recYds ?? null, lP?.recYds ?? null, (p) => posVal(p, (x) => x[posKey].recYds), null, "Rank 1 = fewest allowed");
+    pushMatch(`${posKey} targets allowed/g`, oP?.targets ?? null, lP?.targets ?? null, (p) => posVal(p, (x) => x[posKey].targets), tM, "Volume factor applied");
     pushMatch("Pass yds allowed/g", oppD?.passYds ?? null, lg?.passYds ?? null, (p) => p.passYds, null, "Context only");
 
     if (input.market === "rec_yds") {
@@ -372,7 +372,7 @@ export function project(input: ProjectionInput): ProjectionResult {
       if (ha.note) steps.push({ label: "Home/away split", value: pct(ha.factor), detail: ha.note });
       projected = projTargets * ypt * effM * wx.factor * ha.factor;
       factors = { matchup: tM * effM, script: script.factor, weather: wx.factor, homeAway: ha.factor, injury: inj.factor };
-      pushMatch(`Yds/target allowed to ${posKey}`, oppYpt, lgYpt, (p) => (p.pos[posKey].targets ? p.pos[posKey].recYds / p.pos[posKey].targets : null), effM, "Efficiency factor applied", 2);
+      pushMatch(`Yds/target allowed to ${posKey}`, oppYpt, lgYpt, (p) => (posVal(p, (x) => x[posKey].targets) ? p.pos[posKey].recYds / p.pos[posKey].targets : null), effM, "Efficiency factor applied", 2);
     } else if (input.market === "receptions") {
       const rate = blendRate(cur, prior, (s) => s.rec, (s) => s.targets);
       const cr = shrinkTo(rate.value, lgCatch, rate.denom, 40);
@@ -384,7 +384,7 @@ export function project(input: ProjectionInput): ProjectionResult {
       if (ha.note) steps.push({ label: "Home/away split", value: pct(ha.factor), detail: ha.note });
       projected = projTargets * cr * effM * ha.factor;
       factors = { matchup: tM * effM, script: script.factor, weather: 1, homeAway: ha.factor, injury: inj.factor };
-      pushMatch(`Catch rate allowed to ${posKey}`, oppCatch === null ? null : oppCatch * 100, lgCatch === null ? null : lgCatch * 100, (p) => (p.pos[posKey].targets ? p.pos[posKey].rec / p.pos[posKey].targets : null), effM, "Efficiency factor applied");
+      pushMatch(`Catch rate allowed to ${posKey}`, oppCatch === null ? null : oppCatch * 100, lgCatch === null ? null : lgCatch * 100, (p) => (posVal(p, (x) => x[posKey].targets) ? p.pos[posKey].rec / p.pos[posKey].targets : null), effM, "Efficiency factor applied");
     } else {
       // Longest reception: recency-weighted per-game long catch, scaled by the
       // target projection vs the player's usual volume, and opponent yds/catch.
@@ -514,7 +514,7 @@ export function project(input: ProjectionInput): ProjectionResult {
     projected = lam0 * effM * envM * inj.factor;
     factors = { matchup: effM, script: envM, weather: 1, homeAway: 1, injury: inj.factor };
     volume = { label: "Opportunities", projected: car.value + tg.value, season: (car.season ?? 0) + (tg.season ?? 0), last3: (car.l3 ?? 0) + (tg.l3 ?? 0), share: null, shareLabel: null };
-    pushMatch(`TDs allowed to ${posKey}s/g`, oTd, lTd, (p) => p.pos[posKey].rushTD + p.pos[posKey].recTD, effM, "Applied", 2);
+    pushMatch(`TDs allowed to ${posKey}s/g`, oTd, lTd, (p) => posVal(p, (x) => x[posKey].rushTD + x[posKey].recTD), effM, "Applied", 2);
     pushMatch("Points allowed/g", oppD?.points ?? null, lg?.points ?? null, (p) => p.points, null, "Context only");
     if (oppD?.redZoneTrips !== null && oppD?.redZoneTrips !== undefined) {
       pushMatch("Red-zone trips allowed/g", oppD.redZoneTrips, lg?.redZoneTrips ?? null, (p) => p.redZoneTrips, null, "Context only");

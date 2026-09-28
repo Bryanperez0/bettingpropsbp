@@ -1,6 +1,6 @@
 import type { AnalyzedProp, Game, InjuryItem, RosterPlayer, SeasonDataset, SourceMeta } from "../../shared/types";
 import type { GameDetail, PlayerListItem, PlayerProfile, RankRow, SlimProp, StatSummary, StatusInfo, TeamSummary } from "../../shared/api";
-import { buildLeagueContext, buildPlayerLogs, defenseRank, offenseRank, type LeagueContext, type TeamProfile } from "../../shared/model/league";
+import { buildLeagueContext, buildPlayerLogs, defenseRank, offenseRank, posVal, type LeagueContext, type TeamProfile } from "../../shared/model/league";
 import { positionGroup } from "../../shared/model/markets";
 import { mean, median, round, sum } from "../../shared/model/stats";
 import { readJSON } from "../cache";
@@ -65,9 +65,9 @@ function defRanks(L: LeagueContext, team: string): RankRow[] {
     row("Rush yds allowed/g", (p) => p.rushYds),
     row("YPC allowed", (p) => (p.rushAtt ? p.rushYds / p.rushAtt : null), 2),
     row("Yds/att allowed", (p) => (p.passAtt ? p.passYds / p.passAtt : null), 2),
-    row("WR rec yds allowed/g", (p) => p.pos.WR.recYds),
-    row("TE rec yds allowed/g", (p) => p.pos.TE.recYds),
-    row("RB rush yds allowed/g", (p) => p.pos.RB.rushYds),
+    row("WR rec yds allowed/g", (p) => posVal(p, (x) => x.WR.recYds)),
+    row("TE rec yds allowed/g", (p) => posVal(p, (x) => x.TE.recYds)),
+    row("RB rush yds allowed/g", (p) => posVal(p, (x) => x.RB.rushYds)),
   ];
 }
 

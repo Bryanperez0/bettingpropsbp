@@ -1,5 +1,6 @@
 import type { AnalyzedProp, PerformanceBucket, PerformanceSummary, SeasonDataset, TrackedPick } from "../../shared/types";
 import { MARKETS } from "../../shared/model/markets";
+import { isActionable } from "../../shared/model/engine";
 import { unitsWon } from "../../shared/model/stats";
 import { normName } from "../../shared/names";
 import { readJSON, writeJSON } from "../cache";
@@ -26,6 +27,7 @@ export function selectNewPicks(ledger: TrackedPick[], props: AnalyzedProp[], now
   for (const p of props) {
     if (p.lineSource !== "sportsbook") continue;
     if (p.confidence.total < TRACK_MIN_CONFIDENCE || p.probEdge <= 0) continue;
+    if (!isActionable(p)) continue; // no price for this side at any book
     if (Date.parse(p.kickoff) <= Date.parse(now)) continue;
     const id = pickKey({ gameId: p.gameId, market: p.market, playerId: p.player.id, playerName: p.player.name, side: p.side });
     if (have.has(id)) continue;

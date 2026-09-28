@@ -1,5 +1,5 @@
 import type { AnalyzedProp, Game, GameBox, InjuryItem, RosterPlayer, SeasonDataset, SourceMeta } from "../../shared/types";
-import { analyzeProp } from "../../shared/model/engine";
+import { analyzeProp, isActionable } from "../../shared/model/engine";
 import { buildLeagueContext, buildPlayerLogs, type LeagueContext } from "../../shared/model/league";
 import type { TeammateOut } from "../../shared/model/projection";
 import { MARKETS, positionGroup } from "../../shared/model/markets";
@@ -247,6 +247,7 @@ export function topProps(props: AnalyzedProp[], n = 20, nowMs = Date.now()): Ana
   for (const p of props) {
     if (Date.parse(p.kickoff) <= nowMs) continue;
     if (p.tier === "negative" || p.probEdge <= 0) continue;
+    if (!isActionable(p)) continue; // e.g. anytime-TD "No" that no book offers
     const k = p.player.id ?? p.player.name;
     const c = perPlayer.get(k) ?? 0;
     if (c >= 2) continue;

@@ -77,3 +77,14 @@ describe("recommendation ledger", () => {
     expect(b90.units).toBeCloseTo(2 * (100 / 110), 2);
   });
 });
+
+describe("actionability", () => {
+  it("does not track or rank a side no book prices", async () => {
+    const { topProps } = await import("../server/services/analysis");
+    const noPrice = prop({ gameId: "G9", odds: { over: 150, under: null, side: null }, side: "under", kickoff: "2099-01-01T00:00:00Z" });
+    expect(selectNewPicks([], [noPrice], NOW)).toHaveLength(0);
+    expect(topProps([noPrice], 20, Date.parse(NOW))).toHaveLength(0);
+    const priced = prop({ gameId: "G10", kickoff: "2099-01-01T00:00:00Z" });
+    expect(topProps([priced], 20, Date.parse(NOW))).toHaveLength(1);
+  });
+});

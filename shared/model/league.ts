@@ -43,6 +43,11 @@ export interface TeamProfile {
 
 export const POS_COVERAGE_MIN = 0.8;
 
+/** By-position value, or null when the team's position coverage is too thin to trust. */
+export function posVal(p: TeamProfile, f: (pos: TeamProfile["pos"]) => number): number | null {
+  return (p.posCoverage ?? 0) >= POS_COVERAGE_MIN ? f(p.pos) : null;
+}
+
 export interface LeagueContext {
   season: number;
   gamesCounted: number;

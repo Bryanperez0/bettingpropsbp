@@ -7,8 +7,13 @@ import { getWeekGames } from "./schedule";
 export interface DatasetResult {
   dataset: SeasonDataset;
   pending: number;
+  /** Games whose box score failed repeatedly and are no longer retried. */
+  skipped: number;
   totalCompleted: number;
 }
+
+/** After this many failed fetches a game is skipped (reported, not retried every minute). */
+const MAX_ATTEMPTS = 3;
 
 /**
  * Builds a season of box scores incrementally. Completed games never change,
@@ -25,18 +30,34 @@ export async function getDataset(season: number, weeks: number[], deadline: numb
   const weekLists = await mapLimit(weeks, 6, (w) => getWeekGames(season, 2, w), deadline);
   for (const games of weekLists) for (const g of games ?? []) if (g.state === "post") completed.push(g.id);
 
-  const missing = completed.filter((id) => !have.has(id));
+  const failKey = `dataset-failures/${season}`;
+  const failures: Record<string, number> = (await readJSON<Record<string, number>>(failKey))?.value ?? {};
+  const missing = completed.filter((id) => !have.has(id) && (failures[id] ?? 0) < MAX_ATTEMPTS);
+  const skipped = completed.filter((id) => !have.has(id) && (failures[id] ?? 0) >= MAX_ATTEMPTS).length;
   const added: GameBox[] = [];
+  let failuresChanged = false;
   if (missing.length) {
-    const results = await mapLimit(missing, 6, async (id) => (await fetchSummary(id)).box, deadline);
-    for (const b of results) if (b && b.players.length) added.push(b);
+    const results = await mapLimit(missing, 6, async (id) => {
+      try {
+        const box = (await fetchSummary(id)).box;
+        if (!box || !box.players.length) throw new Error("no box score");
+        return box;
+      } catch (e) {
+        failures[id] = (failures[id] ?? 0) + 1;
+        failuresChanged = true;
+        throw e;
+      }
+    }, deadline);
+    for (const b of results) if (b) added.push(b);
   }
+  if (failuresChanged) await writeJSON(failKey, failures);
   if (added.length) {
     dataset.games = [...dataset.games, ...added].sort((a, b) => a.date.localeCompare(b.date));
     dataset.builtAt = new Date().toISOString();
     await writeJSON(key, dataset);
   }
-  return { dataset, pending: missing.length - added.length, totalCompleted: completed.length };
+  const stillMissing = completed.filter((id) => !have.has(id) && !added.some((b) => b.gameId === id) && (failures[id] ?? 0) < MAX_ATTEMPTS).length;
+  return { dataset, pending: stillMissing, skipped: skipped + (missing.length - added.length - stillMissing), totalCompleted: completed.length };
 }
 
 export async function readDataset(season: number): Promise<SeasonDataset | null> {
@@ -50,8 +71,8 @@ export function datasetMeta(d: DatasetResult, label: string): SourceMeta {
     provider: "ESPN box scores",
     status: d.dataset.games.length ? (d.pending ? "cached" : "live") : "unavailable",
     fetchedAt: d.dataset.games.length ? d.dataset.builtAt : null,
-    note: d.pending
+    note: (d.pending
       ? `${d.dataset.games.length}/${d.totalCompleted} completed games loaded; ${d.pending} still loading`
-      : `${d.dataset.games.length} completed games`,
+      : `${d.dataset.games.length} completed games`) + (d.skipped ? `; ${d.skipped} box score(s) unavailable from ESPN` : ""),
   };
 }

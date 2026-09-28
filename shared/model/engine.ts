@@ -253,6 +253,15 @@ export function analyzeProp(input: AnalyzeInput): AnalyzedProp | null {
 
 const roundOrNull = (x: number | null) => (x === null ? null : round(x, 1));
 
+/**
+ * A recommendation is actionable only if a sportsbook prices the recommended
+ * side (e.g. most books don't offer an anytime-TD "No"). Demo lines have no
+ * prices by design and are labeled separately.
+ */
+export function isActionable(p: Pick<AnalyzedProp, "lineSource" | "odds">): boolean {
+  return p.lineSource === "demo" || p.odds.side !== null;
+}
+
 export function propId(gameId: string, playerName: string, market: string): string {
   return `${gameId}-${market}-${playerName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")}`;
 }
