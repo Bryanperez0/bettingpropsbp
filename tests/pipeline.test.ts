@@ -9,6 +9,9 @@ import { join } from "node:path";
 import { useMemoryStore } from "../server/cache";
 import { buildAnalysis, topProps } from "../server/services/analysis";
 import { readLedger } from "../server/services/tracking";
+import { readHistory } from "../server/services/history";
+import { readJSON, writeJSON } from "../server/cache";
+import type { AnalysisSnapshot } from "../server/services/analysis";
 
 const fx = (f: string) => JSON.parse(readFileSync(join(__dirname, "fixtures", f), "utf8"));
 const ok = (body: unknown, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json", ...headers } });
@@ -111,7 +114,13 @@ describe("analysis pipeline", () => {
 
   it("with sportsbook lines: matches players, excludes OUT players, analyzes and tracks", async () => {
     process.env.ODDS_API_KEY = "test-key";
+    // Fixture set lacks most box scores: they count as loading until they fail 3 times.
+    const first = await buildAnalysis(20_000);
+    expect(first.quality.datasetPending).toBeGreaterThan(0);
+    expect(await readLedger()).toHaveLength(0); // incomplete builds are never tracked
+    await buildAnalysis(20_000);
     const s = await buildAnalysis(20_000);
+    expect(s.quality).toEqual({ datasetPending: 0, rosterTeamsMissing: 0, injuriesOk: true });
     const names = s.props.map((p) => `${p.player.name}:${p.market}`);
     expect(names).toContain("D'Andre Swift:rush_yds");
     expect(names).toContain("DeVonta Smith:rec_yds");
@@ -119,6 +128,7 @@ describe("analysis pipeline", () => {
     expect(names).not.toContain("Caleb Williams:pass_yds"); // listed Out in the real injury report
     expect(s.stats.excludedInjured).toBe(1);
     expect(s.stats.unmatched).toBe(1); // "Not A Real Player"
+    expect(s.warnings.join(" ")).toContain("Not A Real Player");
 
     const smith = s.props.find((p) => p.player.name === "DeVonta Smith")!;
     expect(smith.line).toBe(60.5); // consensus: most common line across books... tie -> nearest median
@@ -143,5 +153,32 @@ describe("analysis pipeline", () => {
     const ledger = await readLedger();
     expect(ledger.every((p) => p.confidence >= 50)).toBe(true);
     expect(ledger.length).toBe(s.props.filter((p) => p.confidence.total >= 50 && p.probEdge > 0).length);
+  });
+
+  it("records score history only when something moves, with the reason", async () => {
+    process.env.ODDS_API_KEY = "test-key";
+    for (let i = 0; i < 3; i++) await buildAnalysis(20_000);
+    const s = await buildAnalysis(20_000);
+    const swift = s.props.find((p) => p.player.name === "D'Andre Swift" && p.market === "rush_yds")!;
+    const hist = await readHistory(swift.gameId, swift.id);
+    expect(hist).toHaveLength(1); // unchanged rebuilds add nothing
+    expect(hist[0].changes).toEqual(["First calculation"]);
+    expect(hist[0].confidence).toBe(swift.confidence.total);
+  });
+
+  it("never replaces a complete analysis with an incomplete one", async () => {
+    process.env.ODDS_API_KEY = "test-key";
+    for (let i = 0; i < 3; i++) await buildAnalysis(20_000);
+    const good = (await readJSON<AnalysisSnapshot>("analysis/current"))!.value;
+    // Next refresh: ESPN rosters fail for everyone and the old roster cache is gone.
+    await writeJSON("espn/rosters", null as never);
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL) => (/roster|\/teams$/.test(String(input)) ? new Response("no", { status: 503 }) : realFetch(input))));
+    process.env.ODDS_API_KEY = "test-key";
+    const kept = await buildAnalysis(20_000).catch(() => null);
+    vi.stubGlobal("fetch", realFetch);
+    const saved = (await readJSON<AnalysisSnapshot>("analysis/current"))!.value;
+    expect(saved.generatedAt).toBe(good.generatedAt);
+    if (kept) expect(kept.props.length).toBe(good.props.length);
   });
 });

@@ -5,6 +5,7 @@ import { PlayerAvatar, TeamLogo } from "../components/Media";
 import { BooksTable, ConfidenceMeter, ConfidenceTable, HitRateGrid, LineMovement, SideBadge, TierBadge } from "../components/PropParts";
 import { InjuryTable, LinesTable, WeatherBadge } from "../components/GameParts";
 import { Freshness, Warnings } from "../components/Freshness";
+import { ScoreHistory } from "../components/ScoreHistory";
 import { Card, ErrorState, Pill, Section, Spinner, Stat, Unavailable } from "../components/ui";
 import { fmtFixed, fmtKickoff, fmtOdds, fmtPct, fmtSigned, projectionText } from "../utils/format";
 
@@ -13,7 +14,7 @@ export default function PropDetail() {
   const q = useProp(id);
   if (q.isLoading) return <Spinner label="Loading prop analysis" />;
   if (q.isError || !q.data) return <ErrorState error={q.error} retry={() => q.refetch()} />;
-  const { prop: p, game, injuries } = q.data.data;
+  const { prop: p, game, injuries, history } = q.data.data;
   const isProb = p.unit === "prob";
   const statLabel = p.marketLabel.toLowerCase();
   const teamInj = injuries.filter((i) => i.team === p.player.team);
@@ -173,6 +174,9 @@ export default function PropDetail() {
         <div className="space-y-6">
           <Section title="Confidence breakdown" subtitle={`Weights are specific to ${p.marketLabel}.`} className="mb-0">
             <Card className="p-4"><ConfidenceTable c={p.confidence} /></Card>
+          </Section>
+          <Section title="Score history" subtitle="Why the confidence moved between refreshes." className="mb-0">
+            <Card className="p-4"><ScoreHistory entries={history ?? []} unit={p.unit} /></Card>
           </Section>
           <Section title="Line movement" className="mb-0"><Card className="p-4"><LineMovement prop={p} /></Card></Section>
           <Section title="Sportsbooks" className="mb-0"><Card className="p-4"><BooksTable books={p.books} unit={p.unit} /></Card></Section>

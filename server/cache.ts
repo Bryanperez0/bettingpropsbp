@@ -1,9 +1,16 @@
 import { getStore } from "@netlify/blobs";
 
 /**
- * Persistent cache + storage on Netlify Blobs. When Blobs isn't available
- * (plain local Node, tests) it falls back to process memory so the app still
- * runs — data just won't survive a restart.
+ * Persistent cache + storage on Netlify Blobs.
+ *
+ * Resilience rules:
+ * - A failed read or write is retried once. It never switches Blobs off for
+ *   the rest of the instance (a single hiccup used to leave a warm function
+ *   running without storage, which made scores differ between instances).
+ * - Every value read or written is mirrored in process memory, so a failed
+ *   read can fall back to the last value this instance saw.
+ * - When Blobs isn't available at all (plain local Node, tests) the memory
+ *   store is used and the app reports "memory" storage.
  */
 
 interface Envelope<T> {
@@ -14,18 +21,22 @@ interface Envelope<T> {
 type Store = {
   get(key: string): Promise<unknown>;
   set(key: string, value: unknown): Promise<void>;
-  del(key: string): Promise<void>;
 };
 
 const memory = new Map<string, unknown>();
 const memoryStore: Store = {
   async get(k) { return memory.get(k) ?? null; },
   async set(k, v) { memory.set(k, v); },
-  async del(k) { memory.delete(k); },
 };
 
 let store: Store | null = null;
 let backend: "blobs" | "memory" = "memory";
+const health = { readErrors: 0, writeErrors: 0, lastError: null as string | null, lastErrorAt: null as string | null };
+
+function note(e: unknown) {
+  health.lastError = e instanceof Error ? `${e.name}: ${e.message}`.slice(0, 300) : String(e).slice(0, 300);
+  health.lastErrorAt = new Date().toISOString();
+}
 
 function getBackend(): Store {
   if (store) return store;
@@ -34,19 +45,32 @@ function getBackend(): Store {
     store = {
       async get(k) { return s.get(k, { type: "json" }); },
       async set(k, v) { await s.setJSON(k, v); },
-      async del(k) { await s.delete(k); },
     };
     backend = "blobs";
-  } catch {
+  } catch (e) {
     store = memoryStore;
     backend = "memory";
+    note(e);
   }
   return store;
+}
+
+async function retry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch {
+    await new Promise((r) => setTimeout(r, 250));
+    return fn();
+  }
 }
 
 export function storageBackend() {
   getBackend();
   return backend;
+}
+
+export function storageHealth() {
+  return { backend: storageBackend(), ...health };
 }
 
 /** Test hook: force the in-memory store. */
@@ -56,25 +80,49 @@ export function useMemoryStore() {
   memory.clear();
 }
 
+/** Test hook: use a custom backend (e.g. one that fails on purpose). */
+export function useTestStore(s: Store) {
+  store = s;
+  backend = "blobs";
+  memory.clear();
+}
+
+const isEnvelope = <T>(v: unknown): v is Envelope<T> => !!v && typeof v === "object" && "savedAt" in (v as object);
+
 export async function readJSON<T>(key: string): Promise<Envelope<T> | null> {
+  const s = getBackend();
+  if (s === memoryStore) {
+    const v = memory.get(key);
+    return isEnvelope<T>(v) ? v : null;
+  }
   try {
-    const v = (await getBackend().get(key)) as Envelope<T> | null;
-    return v && typeof v === "object" && "savedAt" in v ? v : null;
-  } catch (e) {
-    // Blobs misconfigured at runtime: degrade to memory for the rest of this invocation.
-    if (backend === "blobs") { store = memoryStore; backend = "memory"; }
-    console.warn("cache read failed", key, e);
+    const v = await retry(() => s.get(key));
+    if (isEnvelope<T>(v)) {
+      memory.set(key, v);
+      return v;
+    }
     return null;
+  } catch (e) {
+    health.readErrors++;
+    note(e);
+    console.warn("blobs read failed; using this instance's last copy", key, e);
+    const v = memory.get(key);
+    return isEnvelope<T>(v) ? v : null;
   }
 }
 
 export async function writeJSON<T>(key: string, value: T): Promise<string> {
   const savedAt = new Date().toISOString();
+  const env: Envelope<T> = { savedAt, value };
+  memory.set(key, env);
+  const s = getBackend();
+  if (s === memoryStore) return savedAt;
   try {
-    await getBackend().set(key, { savedAt, value } satisfies Envelope<T>);
+    await retry(() => s.set(key, env));
   } catch (e) {
-    console.warn("cache write failed", key, e);
-    memory.set(key, { savedAt, value });
+    health.writeErrors++;
+    note(e);
+    console.warn("blobs write failed", key, e);
   }
   return savedAt;
 }

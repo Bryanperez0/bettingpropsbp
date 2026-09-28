@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { fetchScoreboard } from "../server/providers/espn";
+import { fetchScoreboard, resetEspnHostPreference } from "../server/providers/espn";
 
 const sb = JSON.parse(readFileSync(join(__dirname, "fixtures", "scoreboard-week3.json"), "utf8"));
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); resetEspnHostPreference(); });
 
 describe("ESPN host fallback", () => {
   it("uses the backup host when the primary refuses with 403, sending browser headers", async () => {
@@ -19,6 +19,9 @@ describe("ESPN host fallback", () => {
     expect(r.games.length).toBe(16);
     expect(calls.map((c) => c.host)).toEqual(["site.api.espn.com", "site.web.api.espn.com"]);
     expect(calls[0].ua).toMatch(/^Mozilla\/5\.0/);
+    // Next request goes straight to the host that worked.
+    await fetchScoreboard();
+    expect(calls.slice(2).map((c) => c.host)).toEqual(["site.web.api.espn.com"]);
   });
 
   it("reports which provider refused when every host fails", async () => {

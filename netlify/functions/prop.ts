@@ -1,6 +1,7 @@
 import type { Config } from "@netlify/functions";
 import { error, handle, json } from "../../server/respond";
 import { getAnalysis } from "../../server/services/analysis";
+import { readHistory } from "../../server/services/history";
 
 export default handle(async (_req, params) => {
   const { snapshot } = await getAnalysis({ budgetMs: 8_000 });
@@ -8,7 +9,8 @@ export default handle(async (_req, params) => {
   if (!prop) return error("Prop not found. Lines may have been pulled or refreshed.", 404);
   const game = snapshot.games.find((g) => g.id === prop.gameId) ?? null;
   const injuries = snapshot.injuries.filter((i) => i.team === prop.player.team || i.team === prop.opponent);
-  return json({ prop, game, injuries }, { sources: snapshot.sources, warnings: snapshot.warnings });
+  const history = await readHistory(prop.gameId, prop.id);
+  return json({ prop, game, injuries, history }, { sources: snapshot.sources, warnings: snapshot.warnings });
 });
 
 export const config: Config = { path: "/api/props/:id" };

@@ -1,6 +1,6 @@
 import type { Config } from "@netlify/functions";
 import { getConfig } from "../../server/config";
-import { readJSON, storageBackend, writeJSON } from "../../server/cache";
+import { readJSON, storageHealth, writeJSON } from "../../server/cache";
 import { ESPN_HOSTS } from "../../server/providers/espn";
 
 /**
@@ -36,11 +36,30 @@ async function probe(name: string, url: string, detailOk: (res: Response) => str
 export default async () => {
   const cfg = getConfig();
   const checks: Check[] = [];
-  for (const host of ESPN_HOSTS) {
-    checks.push(await probe(`ESPN schedule (${new URL(host).host})`, `${host}/apis/site/v2/sports/football/nfl/scoreboard`));
+  // Every ESPN feed the app uses, on both hosts. The app needs each feed to
+  // work on at least one host; it automatically uses whichever works.
+  const feeds: [string, string][] = [
+    ["schedule", "scoreboard"],
+    ["teams", "teams"],
+    ["roster", "teams/3/roster"],
+    ["injuries", "injuries"],
+    ["box score", "summary?event=401872929"],
+  ];
+  const espn = await Promise.all(feeds.flatMap(([label, path]) => ESPN_HOSTS.map((host) =>
+    probe(`ESPN ${label} (${new URL(host).host})`, `${host}/apis/site/v2/sports/football/nfl/${path}`))));
+  for (let i = 0; i < feeds.length; i++) {
+    const pair = espn.slice(i * ESPN_HOSTS.length, (i + 1) * ESPN_HOSTS.length);
+    const anyOk = pair.some((c) => c.ok);
+    checks.push({
+      name: `ESPN ${feeds[i][0]}`,
+      ok: anyOk || feeds[i][0] === "injuries",
+      status: pair.map((c) => `${c.name.match(/\((.*)\)/)?.[1]}: ${c.status}`).join(" · "),
+      detail: anyOk ? "Available (app uses whichever host works)"
+        : feeds[i][0] === "injuries" ? "League feed blocked; app falls back to per-game injury reports from box-score feed"
+        : "Blocked on both hosts",
+      ms: Math.max(...pair.map((c) => c.ms)),
+    });
   }
-  checks.push(await probe("ESPN teams/rosters", `${ESPN_HOSTS[0]}/apis/site/v2/sports/football/nfl/teams`));
-  checks.push(await probe("ESPN injuries", `${ESPN_HOSTS[0]}/apis/site/v2/sports/football/nfl/injuries`));
   if (cfg.oddsApiKey) {
     // The /sports list does not use credits.
     const c = await probe("The Odds API (player props)", `https://api.the-odds-api.com/v4/sports?apiKey=${encodeURIComponent(cfg.oddsApiKey)}`,
@@ -56,9 +75,10 @@ export default async () => {
     const stamp = new Date().toISOString();
     await writeJSON("diagnostics/ping", stamp);
     const back = await readJSON<string>("diagnostics/ping");
-    const backend = storageBackend();
-    checks.push({ name: "Netlify Blobs (storage)", ok: backend === "blobs" && back?.value === stamp, status: backend, ms: Date.now() - t,
-      detail: backend === "blobs" ? "Read/write OK" : "Blobs unavailable; using temporary memory (data resets)" });
+    const h = storageHealth();
+    checks.push({ name: "Netlify Blobs (storage)", ok: h.backend === "blobs" && back?.value === stamp, status: h.backend, ms: Date.now() - t,
+      detail: (h.backend === "blobs" ? "Read/write OK" : "Blobs unavailable; using temporary memory (data resets)") +
+        (h.readErrors || h.writeErrors ? `. This server copy has seen ${h.readErrors} read / ${h.writeErrors} write errors; last: ${h.lastError}` : "") });
   } catch (e) {
     checks.push({ name: "Netlify Blobs (storage)", ok: false, status: "Error", detail: (e as Error).message, ms: Date.now() - t });
   }

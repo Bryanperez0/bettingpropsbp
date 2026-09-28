@@ -14,6 +14,7 @@ import { getInjuries, isOut, isDoubtful } from "./injuries";
 import { getGameWeather } from "./weather";
 import { getPropLines } from "./props";
 import { recordPicks, gradePicks } from "./tracking";
+import { recordHistory } from "./history";
 
 export interface AnalysisSnapshot {
   generatedAt: string;
@@ -26,9 +27,21 @@ export interface AnalysisSnapshot {
   sources: SourceMeta[];
   warnings: string[];
   stats: { linesFound: number; analyzed: number; unmatched: number; excludedInjured: number; insufficientData: number; datasetPending: number };
+  /** Completeness of this build's inputs; an incomplete build never replaces a complete one.
+   *  rosterTeamsMissing counts only teams in games not yet played. */
+  quality: SnapshotQuality;
 }
 
+export interface SnapshotQuality {
+  datasetPending: number;
+  rosterTeamsMissing: number;
+  injuriesOk: boolean;
+}
+
+export const isComplete = (q: SnapshotQuality | undefined) => !!q && q.datasetPending === 0 && q.rosterTeamsMissing === 0 && q.injuriesOk;
+
 const SNAPSHOT_KEY = "analysis/current";
+const ATTEMPT_KEY = "analysis/last-attempt";
 export const ANALYSIS_TTL = 15 * MIN;
 
 /** Everything the model needs, loaded once per build. */
@@ -138,7 +151,7 @@ export async function loadModelInputs(datasetDeadline: number, deadline: number,
   const games = [...(prior?.games ?? []), ...cur.dataset.games];
   const league = buildLeagueContext(season, cur.dataset.games, positionMap(rosters));
   const inputs: ModelInputs = { season, games, league, roster: rosters.players, injuries };
-  return { cfg, slate, cur, prior, rosters, inputs, pending };
+  return { cfg, slate, cur, prior, rosters, inputs, pending, injuriesOk: iMeta.status !== "unavailable" };
 }
 
 export async function buildAnalysis(budgetMs = 20_000): Promise<AnalysisSnapshot> {
@@ -148,7 +161,7 @@ export async function buildAnalysis(budgetMs = 20_000): Promise<AnalysisSnapshot
   const warnings: string[] = [];
   const sources: SourceMeta[] = [];
   const now = new Date().toISOString();
-  const { cfg, slate, cur, prior, rosters, inputs, pending } = await loadModelInputs(datasetDeadline, deadline, warnings, sources);
+  const { cfg, slate, cur, prior, rosters, inputs, pending, injuriesOk } = await loadModelInputs(datasetDeadline, deadline, warnings, sources);
 
   // Weather for every game on the slate.
   const games: Game[] = await Promise.all(
@@ -168,13 +181,14 @@ export async function buildAnalysis(budgetMs = 20_000): Promise<AnalysisSnapshot
 
   const stats = { linesFound: lines.groups.length, analyzed: 0, unmatched: 0, excludedInjured: 0, insufficientData: 0, datasetPending: pending };
   const props: AnalyzedProp[] = [];
+  const unmatchedNames: string[] = [];
   const gameById = new Map(games.map((g) => [g.id, g]));
 
   for (const line of lines.groups) {
     const game = gameById.get(line.gameId);
     if (!game) continue;
     const rp = line.playerId ? rosters.players.find((p) => p.id === line.playerId) ?? null : resolvePlayer(line.playerName, game, rosters.players);
-    if (!rp) { stats.unmatched++; continue; }
+    if (!rp) { stats.unmatched++; if (!unmatchedNames.includes(line.playerName)) unmatchedNames.push(line.playerName); continue; }
     const pos = positionGroup(rp.position);
     if (!pos || !MARKETS[line.market].positions.includes(rp.position === "FB" ? "FB" : pos)) { stats.insufficientData++; continue; }
     const inj = findInjury(inputs.injuries, { id: rp.id, name: rp.name, team: rp.team });
@@ -202,24 +216,60 @@ export async function buildAnalysis(budgetMs = 20_000): Promise<AnalysisSnapshot
     props.push(analyzed);
   }
   stats.analyzed = props.length;
-  if (stats.unmatched) warnings.push(`${stats.unmatched} sportsbook player names could not be matched to ESPN rosters and were skipped.`);
+  if (unmatchedNames.length) {
+    warnings.push(`Skipped ${unmatchedNames.length} sportsbook player name${unmatchedNames.length === 1 ? "" : "s"} not found on either team's ESPN roster (usually practice-squad or inactive players): ${unmatchedNames.join(", ")}.`);
+  }
 
   props.sort((a, b) => b.confidence.total - a.confidence.total || b.probEdge - a.probEdge);
 
+  // Only games still to be played need rosters for this week's props.
+  const slateTeams = new Set(games.filter((g) => g.state !== "post").flatMap((g) => [g.home.abbr, g.away.abbr]));
+  const rosterTeams = new Set(rosters.players.map((p) => p.team));
+  const quality: SnapshotQuality = {
+    datasetPending: pending,
+    rosterTeamsMissing: [...slateTeams].filter((t) => !rosterTeams.has(t)).length,
+    injuriesOk,
+  };
   const snapshot: AnalysisSnapshot = {
     generatedAt: now, season: slate.season, seasonType: slate.seasonType, week: slate.week,
-    games, props, injuries: inputs.injuries, sources, warnings, stats,
+    games, props, injuries: inputs.injuries, sources, warnings, stats, quality,
   };
+
+  // Keep last good data: an incomplete build never replaces a complete
+  // analysis of the same week that is less than 3 hours old.
+  const saved = await readJSON<AnalysisSnapshot>(SNAPSHOT_KEY);
+  if (!isComplete(quality) && saved && isComplete(saved.value.quality) && saved.value.week === snapshot.week &&
+      saved.value.season === snapshot.season && Date.now() - Date.parse(saved.savedAt) < 3 * 60 * MIN) {
+    const missing = [
+      quality.datasetPending ? `${quality.datasetPending} box scores` : "",
+      quality.rosterTeamsMissing ? `${quality.rosterTeamsMissing} team rosters` : "",
+      quality.injuriesOk ? "" : "injury reports",
+    ].filter(Boolean).join(", ");
+    await gradeSafely([cur.dataset, ...(prior ? [prior] : [])]);
+    return { ...saved.value, warnings: [`Latest refresh came back incomplete (missing ${missing}); showing the last complete analysis instead.`, ...saved.value.warnings] };
+  }
+
   await writeJSON(SNAPSHOT_KEY, snapshot);
 
-  // Model performance ledger: record new recommendations, grade finished ones.
-  try {
-    await recordPicks(props, now);
-    await gradePicks([cur.dataset, ...(prior ? [prior] : [])]);
-  } catch (e) {
-    console.warn("tracking failed", e);
+  // Only complete builds feed score history and the performance ledger.
+  if (isComplete(quality)) {
+    try {
+      await recordHistory(props, now);
+      await recordPicks(props, now);
+    } catch (e) {
+      console.warn("history/tracking failed", e);
+    }
   }
+  await gradeSafely([cur.dataset, ...(prior ? [prior] : [])]);
   return snapshot;
+}
+
+async function gradeSafely(datasets: SeasonDataset[]) {
+  try {
+    await gradePicks(datasets);
+  } catch (e) {
+    console.warn("grading failed", e);
+  }
 }
 
 /** Latest snapshot; rebuilds when older than ANALYSIS_TTL. Falls back to stale data on failure. */
@@ -229,6 +279,12 @@ export async function getAnalysis(opts: { force?: boolean; budgetMs?: number } =
   const ttl = saved && saved.value.stats.datasetPending > 0 ? MIN : ANALYSIS_TTL;
   const fresh = saved && Date.now() - Date.parse(saved.savedAt) < ttl;
   if (saved && fresh && !opts.force) return { snapshot: saved.value, stale: false };
+  // Avoid rebuilding on every request while a refresh keeps coming back incomplete.
+  const lastAttempt = await readJSON<string>(ATTEMPT_KEY);
+  if (saved && !opts.force && lastAttempt && Date.now() - Date.parse(lastAttempt.savedAt) < MIN) {
+    return { snapshot: saved.value, stale: false };
+  }
+  await writeJSON(ATTEMPT_KEY, "attempt");
   try {
     return { snapshot: await buildAnalysis(opts.budgetMs), stale: false };
   } catch (e) {

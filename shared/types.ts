@@ -363,6 +363,22 @@ export interface AnalyzedProp {
   generatedAt: string;
 }
 
+/** One recalculation of a prop, kept so score changes can be explained. */
+export interface ScoreHistoryEntry {
+  at: string;
+  confidence: number;
+  tier: EdgeTier;
+  side: PropSide;
+  line: number;
+  odds: number | null;
+  projection: number;
+  modelProb: number;
+  components: Record<string, number>;
+  penalties: Record<string, number>;
+  /** What moved since the previous entry. */
+  changes: string[];
+}
+
 // ---------------------------------------------------------------------------
 // Tracking / model performance
 // ---------------------------------------------------------------------------

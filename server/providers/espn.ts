@@ -14,22 +14,34 @@ import { fetchJson as rawFetchJson, HttpError, type FetchResult } from "../http"
 export const ESPN_HOSTS = ["https://site.api.espn.com", "https://site.web.api.espn.com"];
 const SITE = `${ESPN_HOSTS[0]}/apis/site/v2/sports/football/nfl`;
 
+/** Index of the host that last worked; ESPN refuses some cloud IPs on the primary. */
+let preferredHost = 0;
+
 /**
- * Fetch from ESPN, falling back to the backup host when the primary refuses
- * (403/429), errors (5xx) or can't be reached. 404s are real "not found".
+ * Fetch from ESPN, trying the host that last worked first and falling back to
+ * the other when it refuses (403/429), errors (5xx) or can't be reached.
+ * 404s are real "not found".
  */
 async function fetchJson<T>(url: string, opts?: { timeoutMs?: number; retries?: number }): Promise<FetchResult<T>> {
   let firstErr: unknown;
-  for (const host of ESPN_HOSTS) {
-    const u = url.replace(ESPN_HOSTS[0], host);
+  const order = [preferredHost, ...ESPN_HOSTS.keys()].filter((v, i, a) => a.indexOf(v) === i);
+  for (const idx of order) {
+    const u = url.replace(ESPN_HOSTS[0], ESPN_HOSTS[idx]);
     try {
-      return await rawFetchJson<T>(u, opts);
+      const r = await rawFetchJson<T>(u, opts);
+      preferredHost = idx;
+      return r;
     } catch (e) {
       if (e instanceof HttpError && e.status === 404) throw e;
       firstErr ??= e;
     }
   }
   throw firstErr;
+}
+
+/** Test hook. */
+export function resetEspnHostPreference() {
+  preferredHost = 0;
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
