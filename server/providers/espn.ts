@@ -8,9 +8,29 @@
 import type {
   BoxPlayer, Game, GameBox, GameLines, GameState, InjuryItem, RosterPlayer, StatLine, TeamRef, TeamStatLine,
 } from "../../shared/types";
-import { fetchJson } from "../http";
+import { fetchJson as rawFetchJson, HttpError, type FetchResult } from "../http";
 
-const SITE = "https://site.api.espn.com/apis/site/v2/sports/football/nfl";
+/** Primary and backup hosts for the same ESPN site API. */
+export const ESPN_HOSTS = ["https://site.api.espn.com", "https://site.web.api.espn.com"];
+const SITE = `${ESPN_HOSTS[0]}/apis/site/v2/sports/football/nfl`;
+
+/**
+ * Fetch from ESPN, falling back to the backup host when the primary refuses
+ * (403/429), errors (5xx) or can't be reached. 404s are real "not found".
+ */
+async function fetchJson<T>(url: string, opts?: { timeoutMs?: number; retries?: number }): Promise<FetchResult<T>> {
+  let firstErr: unknown;
+  for (const host of ESPN_HOSTS) {
+    const u = url.replace(ESPN_HOSTS[0], host);
+    try {
+      return await rawFetchJson<T>(u, opts);
+    } catch (e) {
+      if (e instanceof HttpError && e.status === 404) throw e;
+      firstErr ??= e;
+    }
+  }
+  throw firstErr;
+}
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Any = any;

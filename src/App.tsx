@@ -14,6 +14,7 @@ const PropFinder = lazy(() => import("./pages/PropFinder"));
 const Injuries = lazy(() => import("./pages/Injuries"));
 const Performance = lazy(() => import("./pages/Performance"));
 const Methodology = lazy(() => import("./pages/Methodology"));
+const Diagnostics = lazy(() => import("./pages/Diagnostics"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 function ScrollToTop() {
@@ -40,6 +41,7 @@ export default function App() {
             <Route path="injuries" element={<Injuries />} />
             <Route path="performance" element={<Performance />} />
             <Route path="methodology" element={<Methodology />} />
+            <Route path="diagnostics" element={<Diagnostics />} />
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>

@@ -51,7 +51,7 @@ export function ErrorState({ error, retry }: { error: unknown; retry?: () => voi
     <Card className="p-6">
       <p className="font-semibold text-negative">Couldn't load data</p>
       <p className="mt-1 text-sm text-ink-2">{msg}</p>
-      <p className="mt-2 text-xs text-ink-3">The first load of a new week can take a few tries while box scores are collected.</p>
+      <p className="mt-2 text-xs text-ink-3">The first load of a new week can take a few tries while box scores are collected. To see which data source is failing, open <Link to="/diagnostics" className="text-over hover:underline">Data connections</Link>.</p>
       {retry && (
         <button onClick={retry} className="mt-4 rounded-lg bg-surface-3 px-3 py-1.5 text-sm font-medium text-ink hover:bg-line">
           Try again

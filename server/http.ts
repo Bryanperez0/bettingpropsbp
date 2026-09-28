@@ -1,8 +1,22 @@
+const redact = (url: string) => url.replace(/apiKey=[^&]+/, "apiKey=***");
+
 export class HttpError extends Error {
   constructor(public status: number, public url: string, message?: string) {
-    super(message ?? `HTTP ${status} for ${url.replace(/apiKey=[^&]+/, "apiKey=***")}`);
+    let host = url;
+    try { host = new URL(url).host; } catch { /* keep raw */ }
+    super(message ?? `${host} returned HTTP ${status}${status === 403 ? " (request refused by the provider)" : ""} for ${redact(url)}`);
   }
 }
+
+/**
+ * Some providers (ESPN sits behind bot protection) refuse requests that don't
+ * look like a normal browser. Send standard browser headers.
+ */
+const HEADERS = {
+  accept: "application/json, text/plain, */*",
+  "accept-language": "en-US,en;q=0.9",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+};
 
 export interface FetchResult<T> {
   data: T;
@@ -17,7 +31,7 @@ export async function fetchJson<T>(url: string, opts: { timeoutMs?: number; retr
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
-      const res = await fetch(url, { signal: ctrl.signal, headers: { accept: "application/json", "user-agent": "nfl-prop-analytics/1.0" } });
+      const res = await fetch(url, { signal: ctrl.signal, headers: HEADERS });
       if (!res.ok) {
         const err = new HttpError(res.status, url);
         if (res.status >= 500 && attempt < retries) { lastErr = err; continue; }

@@ -12,6 +12,7 @@ const NAV = [
   { to: "/injuries", label: "Injuries" },
   { to: "/performance", label: "Model Performance" },
   { to: "/methodology", label: "How it works" },
+  { to: "/diagnostics", label: "Data connections" },
 ];
 
 const linkCls = ({ isActive }: { isActive: boolean }) =>

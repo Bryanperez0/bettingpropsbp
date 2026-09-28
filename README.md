@@ -121,6 +121,19 @@ Set these in **Netlify → Site configuration → Environment variables** (and i
 
 **First load of a season:** the app has to collect every completed box score, about 16 per week. It does this in batches, so the dashboard may say "Still collecting box scores" for a few minutes. Press **Refresh** or wait for the 15-minute schedule. Loading last season (about 272 games) takes a few more cycles.
 
+## Troubleshooting
+
+Open **`/diagnostics`** on your site ("Data connections" in the menu). It checks ESPN (both hosts), The Odds API, Open-Meteo and Netlify Blobs from the server and shows each one's HTTP status. No keys are displayed.
+
+| What you see | Meaning | Fix |
+|---|---|---|
+| ESPN `HTTP 403` on both hosts | ESPN is refusing requests from Netlify's servers | Tell the developer. The ESPN adapter (`server/providers/espn.ts`) can be pointed at another provider. |
+| Odds API `Not configured` | `ODDS_API_KEY` missing | Add it in Netlify environment variables, then redeploy |
+| Odds API `HTTP 401` | Key wrong or inactive | Re-copy the key from the-odds-api.com |
+| Odds API `HTTP 429` | Out of credits | Wait for reset or upgrade the plan; raise `ODDS_CACHE_MINUTES` |
+
+Environment variable changes only apply after a new deploy (**Deploys → Trigger deploy**).
+
 ## Run locally
 
 ```bash
