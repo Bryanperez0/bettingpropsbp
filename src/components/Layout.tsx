@@ -1,4 +1,7 @@
-import { NavLink, Outlet, Link } from "react-router-dom";
+import { NavLink, Outlet, Link, useLocation } from "react-router-dom";
+import { Suspense } from "react";
+import { ErrorBoundary } from "./ErrorBoundary";
+import { Spinner } from "./ui";
 import { useRefresh, useStatus } from "../hooks/useApi";
 import { timeAgo } from "../utils/format";
 import { Disclaimer } from "./Disclaimer";
@@ -39,6 +42,7 @@ function RefreshButton() {
 }
 
 export function Layout() {
+  const { pathname } = useLocation();
   return (
     <div className="min-h-screen lg:flex">
       <aside className="hidden w-60 shrink-0 border-r border-line bg-surface lg:block">
@@ -75,7 +79,12 @@ export function Layout() {
           </nav>
         </header>
         <main className="mx-auto max-w-7xl px-4 py-6 lg:px-8">
-          <Outlet />
+          {/* Keyed by path: navigating away from a crashed page clears the error. */}
+          <ErrorBoundary key={pathname}>
+            <Suspense fallback={<Spinner />}>
+              <Outlet />
+            </Suspense>
+          </ErrorBoundary>
         </main>
         <footer className="mx-auto max-w-7xl border-t border-line px-4 py-6 lg:px-8">
           <Disclaimer />

@@ -18,7 +18,14 @@
   port = 8888
   framework = "#custom"
 
-# Single-page app: send every non-API route to index.html.
+# Missing build files must 404 (not fall back to index.html), so an old tab
+# after a redeploy fails cleanly and the app reloads itself.
+[[redirects]]
+  from = "/assets/*"
+  to = "/404.html"
+  status = 404
+
+# Single-page app: send every other route to index.html.
 [[redirects]]
   from = "/*"
   to = "/index.html"
@@ -30,6 +37,11 @@
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
 
 [[headers]]
   for = "/assets/*"
