@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useProps } from "../hooks/useApi";
 import { MARKET_LIST, positionGroup } from "../../shared/model/markets";
+import { matchesName } from "../../shared/search";
 import type { SlimProp } from "../../shared/api";
 import { PlayerAvatar } from "../components/Media";
 import { SideBadge, TierBadge } from "../components/PropParts";
@@ -25,10 +26,10 @@ export default function PropFinder() {
   const books = useMemo(() => [...new Set(props.flatMap((p) => p.books.map((b) => b.bookTitle)))].sort(), [props]);
 
   const list = useMemo(() => {
-    const s = f.player.trim().toLowerCase();
+    const s = f.player.trim();
     const now = Date.now();
     const out = props.filter((p) =>
-      (!s || p.player.name.toLowerCase().includes(s)) &&
+      matchesName(s, p.player.name) &&
       (f.team === "All" || p.player.team === f.team) &&
       (f.opp === "All" || p.opponent === f.opp) &&
       (f.pos === "All" || positionGroup(p.player.position) === f.pos) &&

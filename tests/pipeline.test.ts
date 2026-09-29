@@ -28,7 +28,7 @@ const TEST_ODDS = {
         { key: "player_reception_yds", outcomes: [o("Over", "DeVonta Smith", -110, 60.5), o("Under", "DeVonta Smith", -110, 60.5), o("Over", "Rome Odunze", -110, 40.5), o("Under", "Rome Odunze", -110, 40.5)] },
         { key: "player_pass_yds", outcomes: [o("Over", "Caleb Williams", -110, 210.5), o("Under", "Caleb Williams", -110, 210.5), o("Over", "Jalen Hurts", -110, 215.5), o("Under", "Jalen Hurts", -110, 215.5)] },
         { key: "player_receptions", outcomes: [o("Over", "Not A Real Player", -110, 3.5), o("Under", "Not A Real Player", -110, 3.5)] },
-        { key: "player_anytime_td", outcomes: [o("Yes", "D'Andre Swift", 140)] },
+        { key: "player_anytime_td", outcomes: [o("Yes", "D'Andre Swift", 140), o("Yes", "Chicago Bears D/ST", 900), o("Yes", "Philadelphia Eagles Defense", 800)] },
       ],
     },
     {
@@ -127,7 +127,9 @@ describe("analysis pipeline", () => {
     expect(names).toContain("Jalen Hurts:pass_yds");
     expect(names).not.toContain("Caleb Williams:pass_yds"); // listed Out in the real injury report
     expect(s.stats.excludedInjured).toBe(1);
-    expect(s.stats.unmatched).toBe(1); // "Not A Real Player"
+    expect(s.stats.unmatched).toBe(1); // "Not A Real Player" (team-defense bets are not counted)
+    expect(s.stats.teamBets).toBe(2);
+    expect(s.warnings.join(" ")).not.toMatch(/D\/ST|Defense/);
     expect(s.warnings.join(" ")).toContain("Not A Real Player");
 
     const smith = s.props.find((p) => p.player.name === "DeVonta Smith")!;

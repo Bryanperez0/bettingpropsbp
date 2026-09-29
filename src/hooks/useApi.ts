@@ -6,7 +6,8 @@ import type { AnalyzedProp, Game, InjuryItem, PerformanceSummary, ScoreHistoryEn
 const opts = { staleTime: 60_000, refetchInterval: 5 * 60_000 };
 
 export const useDashboard = () => useQuery({ queryKey: ["dashboard"], queryFn: () => api<DashboardData>("dashboard"), ...opts });
-export const useProps = (top?: number) => useQuery({ queryKey: ["props", top ?? "all"], queryFn: () => api<PropsData>(top ? `props?top=${top}` : "props"), ...opts });
+export const useProps = (top?: number, enabled = true) =>
+  useQuery({ queryKey: ["props", top ?? "all"], queryFn: () => api<PropsData>(top ? `props?top=${top}` : "props"), enabled, ...opts });
 export const useProp = (id: string) => useQuery({ queryKey: ["prop", id], queryFn: () => api<{ prop: AnalyzedProp; game: Game | null; injuries: InjuryItem[]; history: ScoreHistoryEntry[] }>(`props/${encodeURIComponent(id)}`), ...opts });
 export const useGames = () => useQuery({ queryKey: ["games"], queryFn: () => api<{ status: StatusInfo; games: Game[]; propCounts: Record<string, number> }>("games"), ...opts });
 export const useGame = (id: string) => useQuery({ queryKey: ["game", id], queryFn: () => api<GameDetail>(`games/${encodeURIComponent(id)}`), ...opts });

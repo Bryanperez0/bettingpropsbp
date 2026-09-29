@@ -26,7 +26,7 @@ export interface AnalysisSnapshot {
   injuries: InjuryItem[];
   sources: SourceMeta[];
   warnings: string[];
-  stats: { linesFound: number; analyzed: number; unmatched: number; excludedInjured: number; insufficientData: number; datasetPending: number };
+  stats: { linesFound: number; analyzed: number; unmatched: number; teamBets?: number; excludedInjured: number; insufficientData: number; datasetPending: number };
   /** Completeness of this build's inputs; an incomplete build never replaces a complete one.
    *  rosterTeamsMissing counts only teams in games not yet played. */
   quality: SnapshotQuality;
@@ -57,6 +57,17 @@ export function teamSpreadFor(game: Game, team: string): number | null {
   const hs = game.lines.homeSpread;
   if (hs === null) return null;
   return team === game.home.abbr ? hs : -hs;
+}
+
+/**
+ * Team-defense bets ("Chicago Bears D/ST", "Philadelphia Eagles Defense") are
+ * listed like players by some books. They aren't player props, so they're
+ * skipped without counting as unmatched names.
+ */
+export function isTeamBet(name: string, game: Game): boolean {
+  if (/\b(d\/st|dst|defen[cs]e|special teams)\b/i.test(name)) return true;
+  const n = name.trim().toLowerCase();
+  return [game.home, game.away].some((t) => n === t.displayName.toLowerCase() || n === t.name.toLowerCase());
 }
 
 /** Find the ESPN player for a sportsbook name among the two teams in a game. */
@@ -179,7 +190,7 @@ export async function buildAnalysis(budgetMs = 20_000): Promise<AnalysisSnapshot
   sources.push(lines.meta);
   warnings.push(...lines.warnings);
 
-  const stats = { linesFound: lines.groups.length, analyzed: 0, unmatched: 0, excludedInjured: 0, insufficientData: 0, datasetPending: pending };
+  const stats = { linesFound: lines.groups.length, analyzed: 0, unmatched: 0, teamBets: 0, excludedInjured: 0, insufficientData: 0, datasetPending: pending };
   const props: AnalyzedProp[] = [];
   const unmatchedNames: string[] = [];
   const gameById = new Map(games.map((g) => [g.id, g]));
@@ -187,6 +198,7 @@ export async function buildAnalysis(budgetMs = 20_000): Promise<AnalysisSnapshot
   for (const line of lines.groups) {
     const game = gameById.get(line.gameId);
     if (!game) continue;
+    if (isTeamBet(line.playerName, game)) { stats.teamBets++; continue; }
     const rp = line.playerId ? rosters.players.find((p) => p.id === line.playerId) ?? null : resolvePlayer(line.playerName, game, rosters.players);
     if (!rp) { stats.unmatched++; if (!unmatchedNames.includes(line.playerName)) unmatchedNames.push(line.playerName); continue; }
     const pos = positionGroup(rp.position);

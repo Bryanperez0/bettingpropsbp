@@ -5,6 +5,7 @@ import { PlayerAvatar, TeamLogo } from "../components/Media";
 import { InjuryStatus } from "../components/GameParts";
 import { Empty, ErrorState, PageHeader, Spinner } from "../components/ui";
 import { positionGroup } from "../../shared/model/markets";
+import { nameScore } from "../../shared/search";
 
 const POS = ["All", "QB", "RB", "WR", "TE"];
 
@@ -17,8 +18,10 @@ export default function Players() {
   const players = q.data?.data.players ?? [];
   const teams = useMemo(() => ["All", ...[...new Set(players.map((p) => p.team))].sort()], [players]);
   const list = useMemo(() => {
-    const s = search.trim().toLowerCase();
-    return players.filter((p) => (pos === "All" || positionGroup(p.position) === pos) && (team === "All" || p.team === team) && (!withProps || p.propCount > 0) && (!s || p.name.toLowerCase().includes(s)));
+    const s = search.trim();
+    const filtered = players.filter((p) => (pos === "All" || positionGroup(p.position) === pos) && (team === "All" || p.team === team) && (!withProps || p.propCount > 0) && (!s || nameScore(s, p.name) > 0));
+    // With a search, best name matches first.
+    return s ? filtered.sort((a, b) => nameScore(s, b.name) - nameScore(s, a.name)) : filtered;
   }, [players, search, pos, team, withProps]);
 
   if (q.isLoading) return <Spinner label="Loading players" />;

@@ -5,6 +5,7 @@ import { Spinner } from "./ui";
 import { useRefresh, useStatus } from "../hooks/useApi";
 import { timeAgo } from "../utils/format";
 import { Disclaimer } from "./Disclaimer";
+import { PlayerSearch } from "./PlayerSearch";
 
 const NAV = [
   { to: "/", label: "Dashboard", end: true },
@@ -71,9 +72,10 @@ export function Layout() {
               <img src="/favicon.svg" alt="" className="h-6 w-6" />
               <span className="font-bold text-ink">Prop Lab</span>
             </Link>
-            <span className="hidden text-sm text-ink-3 lg:inline">Statistical research for NFL player props</span>
+            <PlayerSearch className="hidden w-80 sm:block" />
             <RefreshButton />
           </div>
+          <div className="px-3 pb-2 sm:hidden"><PlayerSearch /></div>
           <nav className="scrollbar-thin flex gap-1 overflow-x-auto px-3 pb-2 lg:hidden" aria-label="Main mobile">
             {NAV.map((n) => <NavLink key={n.to} to={n.to} end={n.end} className={linkCls}>{n.label}</NavLink>)}
           </nav>

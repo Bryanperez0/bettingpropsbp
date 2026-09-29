@@ -12,7 +12,7 @@ export interface StatusInfo {
   oddsConfigured: boolean;
   demoLines: boolean;
   storage: "blobs" | "memory";
-  stats: { linesFound: number; analyzed: number; unmatched: number; excludedInjured: number; insufficientData: number; datasetPending: number };
+  stats: { linesFound: number; analyzed: number; unmatched: number; teamBets?: number; excludedInjured: number; insufficientData: number; datasetPending: number };
 }
 
 export interface DashboardData {
