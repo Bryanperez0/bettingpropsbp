@@ -223,4 +223,26 @@ describe("analysis pipeline", () => {
     expect(live["401872948"].state).toBe("post");
     expect(live["401872948"].players["4430807"].rushYds).toBe(194); // Bijan Robinson's real line
   });
+
+  it("rebuilds a started game's props from cached pregame lines when no frozen copy exists", async () => {
+    process.env.ODDS_API_KEY = "test-key";
+    const first = await buildAnalysis(20_000); // incomplete build: odds get cached, nothing frozen
+    expect(first.quality.datasetPending).toBeGreaterThan(0);
+    expect((await readJSON("frozen/401872963"))?.value ?? null).toBeNull();
+
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL) => {
+      const res = await realFetch(input);
+      if (!/\/scoreboard/.test(String(input)) || /week=/.test(String(input))) return res;
+      const body = await res.json();
+      for (const e of body.events ?? []) if (e.id === "401872963") e.status.type.state = "in";
+      return new Response(JSON.stringify(body), { status: 200 });
+    }));
+    await writeJSON("espn/scoreboard/current", null as never);
+    const after = await buildAnalysis(20_000);
+    vi.stubGlobal("fetch", realFetch);
+    const swift = after.props.find((p) => p.player.name === "D'Andre Swift" && p.market === "rush_yds");
+    expect(swift?.frozen?.state).toBe("in");
+    expect(swift?.line).toBe(55.5);
+  });
 });

@@ -1,4 +1,4 @@
-import type { AnalyzedProp, Game, GameBox, InjuryItem, RosterPlayer, SeasonDataset, SourceMeta } from "../../shared/types";
+import type { AnalyzedProp, Game, GameBox, InjuryItem, PropLineGroup, RosterPlayer, SeasonDataset, SourceMeta } from "../../shared/types";
 import { analyzeProp, isActionable } from "../../shared/model/engine";
 import { buildLeagueContext, buildPlayerLogs, type LeagueContext } from "../../shared/model/league";
 import type { TeammateOut } from "../../shared/model/projection";
@@ -12,7 +12,8 @@ import { getDataset, datasetMeta } from "./dataset";
 import { getRosters, positionMap } from "./rosters";
 import { getInjuries, isOut, isDoubtful } from "./injuries";
 import { getGameWeather } from "./weather";
-import { getPropLines } from "./props";
+import { getPropLines, groupQuotes } from "./props";
+import type { RawPropQuote } from "../providers/oddsApi";
 import { recordPicks, gradePicks } from "./tracking";
 import { recordHistory } from "./history";
 
@@ -196,16 +197,18 @@ export async function buildAnalysis(budgetMs = 20_000): Promise<AnalysisSnapshot
   const unmatchedNames: string[] = [];
   const gameById = new Map(games.map((g) => [g.id, g]));
 
-  for (const line of lines.groups) {
+  /** Analyze one sportsbook line; updates `stats` when `count` is true. */
+  const analyzeLine = (line: PropLineGroup, count = true): AnalyzedProp | null => {
+    const bump = (k: "teamBets" | "unmatched" | "insufficientData" | "excludedInjured") => { if (count) stats[k]++; };
     const game = gameById.get(line.gameId);
-    if (!game) continue;
-    if (isTeamBet(line.playerName, game)) { stats.teamBets++; continue; }
+    if (!game) return null;
+    if (isTeamBet(line.playerName, game)) { bump("teamBets"); return null; }
     const rp = line.playerId ? rosters.players.find((p) => p.id === line.playerId) ?? null : resolvePlayer(line.playerName, game, rosters.players);
-    if (!rp) { stats.unmatched++; if (!unmatchedNames.includes(line.playerName)) unmatchedNames.push(line.playerName); continue; }
+    if (!rp) { bump("unmatched"); if (count && !unmatchedNames.includes(line.playerName)) unmatchedNames.push(line.playerName); return null; }
     const pos = positionGroup(rp.position);
-    if (!pos || !MARKETS[line.market].positions.includes(rp.position === "FB" ? "FB" : pos)) { stats.insufficientData++; continue; }
+    if (!pos || !MARKETS[line.market].positions.includes(rp.position === "FB" ? "FB" : pos)) { bump("insufficientData"); return null; }
     const inj = findInjury(inputs.injuries, { id: rp.id, name: rp.name, team: rp.team });
-    if (inj && isOut(inj.status)) { stats.excludedInjured++; continue; }
+    if (inj && isOut(inj.status)) { bump("excludedInjured"); return null; }
 
     const isHome = rp.team === game.home.abbr;
     const analyzed = analyzeProp({
@@ -225,8 +228,13 @@ export async function buildAnalysis(budgetMs = 20_000): Promise<AnalysisSnapshot
       contextFlags: contextFlagsFor(rp.id, rp.team, line.market, inputs),
       now,
     });
-    if (!analyzed) { stats.insufficientData++; continue; }
-    props.push(analyzed);
+    if (!analyzed) bump("insufficientData");
+    return analyzed;
+  };
+
+  for (const line of lines.groups) {
+    const a = analyzeLine(line);
+    if (a) props.push(a);
   }
   stats.analyzed = props.length;
   if (unmatchedNames.length) {
@@ -249,10 +257,21 @@ export async function buildAnalysis(budgetMs = 20_000): Promise<AnalysisSnapshot
     if (g.state === "pre" && gp.length && isComplete(quality)) await writeJSON(frozenKey(g.id), gp);
   }
   for (const g of games.filter((x) => x.state !== "pre")) {
+    if (props.some((p) => p.gameId === g.id)) continue;
     const f = await readJSON<AnalyzedProp[]>(frozenKey(g.id));
-    if (f && !props.some((p) => p.gameId === g.id)) {
+    if (f?.value?.length) {
       props.push(...f.value.map((p) => ({ ...p, frozen: { state: g.state, frozenAt: f.savedAt } })));
+      continue;
     }
+    // No frozen copy (e.g. the game started before one was saved): rebuild it
+    // from the last pregame sportsbook lines still in the odds cache.
+    const cachedQuotes = await readJSON<RawPropQuote[]>(`odds/props/${g.id}`);
+    if (!cachedQuotes?.value?.length) continue;
+    const rebuilt = groupQuotes(g.id, cachedQuotes.value, cachedQuotes.savedAt)
+      .map((line) => analyzeLine(line, false))
+      .filter((x): x is AnalyzedProp => !!x)
+      .map((p) => ({ ...p, frozen: { state: g.state, frozenAt: cachedQuotes.savedAt } }));
+    props.push(...rebuilt);
   }
 
   props.sort((a, b) => b.confidence.total - a.confidence.total || b.probEdge - a.probEdge);
