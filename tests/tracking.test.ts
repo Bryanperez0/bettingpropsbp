@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gradePick, selectNewPicks, summarize } from "../server/services/tracking";
+import { computeClose, gradePick, selectNewPicks, summarize } from "../server/services/tracking";
 import type { AnalyzedProp, SeasonDataset, TrackedPick } from "../shared/types";
 import { line0 } from "./helpers";
 
@@ -86,5 +86,35 @@ describe("actionability", () => {
     expect(topProps([noPrice], 20, Date.parse(NOW))).toHaveLength(0);
     const priced = prop({ gameId: "G10", kickoff: "2099-01-01T00:00:00Z" });
     expect(topProps([priced], 20, Date.parse(NOW))).toHaveLength(1);
+  });
+});
+
+describe("closing line value", () => {
+  const pick = { market: "rec_yds" as const, side: "over" as const, line: 58.5, odds: -110, impliedProb: 0.5 };
+  it("beats the close when the line moves toward the pick", () => {
+    const c = computeClose(pick, { line: 60.5, over: -110, under: -110 }, "sportsbook-close", NOW);
+    expect(c).toMatchObject({ lineMove: 2, probClv: null, beat: true });
+    expect(computeClose({ ...pick, side: "under" }, { line: 60.5, over: -110, under: -110 }, "sportsbook-close", NOW).beat).toBe(false);
+  });
+  it("at the same line, compares no-vig prices", () => {
+    const c = computeClose(pick, { line: 58.5, over: -130, under: 110 }, "last-seen", NOW);
+    expect(c.lineMove).toBe(0);
+    expect(c.probClv).toBeCloseTo(0.043, 3); // over got more expensive: market agreed
+    expect(c.beat).toBe(true);
+    expect(computeClose(pick, { line: 58.5, over: -110, under: -110 }, "last-seen", NOW).beat).toBeNull(); // even
+  });
+  it("anytime TD compares the Yes price", () => {
+    const td = { market: "anytime_td" as const, side: "over" as const, line: 0.5, odds: 140, impliedProb: 1 / 2.4 };
+    const c = computeClose(td, { line: 0.5, over: 120, under: null }, "sportsbook-close", NOW);
+    expect(c.lineMove).toBe(0);
+    expect(c.beat).toBe(true);
+  });
+  it("summarizes beat rate across picks", () => {
+    const base = selectNewPicks([], [prop({})], NOW)[0];
+    const withClose = (beat: boolean | null): TrackedPick => ({ ...base, close: { line: 60.5, over: -110, under: -110, source: "sportsbook-close", at: NOW, lineMove: beat ? 1 : beat === false ? -1 : 0, probClv: null, beat } });
+    const s = summarize([withClose(true), withClose(true), withClose(false), withClose(null), base]);
+    expect(s.clv).toMatchObject({ tracked: 4, beat: 2, lost: 1, even: 1 });
+    expect(s.clv.beatRate).toBeCloseTo(2 / 3, 3);
+    expect(s.byConfidence.find((b) => b.clvN)!.clvBeat).toBe(2);
   });
 });

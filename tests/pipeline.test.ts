@@ -41,7 +41,7 @@ const TEST_ODDS = {
 };
 
 // Synthetic SportsGameOdds event in its documented v2 shape (TEST DATA ONLY).
-const sgoOdd = (stat: string, player: string, bet: string, side: string, books: Record<string, { odds: string; overUnder?: string }>) => ({
+const sgoOdd = (stat: string, player: string, bet: string, side: string, books: Record<string, { odds: string; overUnder?: string; openOdds?: string; openOverUnder?: string }>) => ({
   oddID: `${stat}-${player}-game-${bet}-${side}`, statID: stat, statEntityID: player, playerID: player, periodID: "game", betTypeID: bet, sideID: side,
   byBookmaker: Object.fromEntries(Object.entries(books).map(([k, v]) => [k, { ...v, available: true, lastUpdatedAt: "2026-09-28T18:00:00Z" }])),
 });
@@ -58,8 +58,8 @@ const SGO_EVENT = {
     JALEN_HURTS_1_NFL: { playerID: "JALEN_HURTS_1_NFL", name: "Jalen Hurts" },
   },
   odds: Object.fromEntries([
-    sgoOdd("receiving_yards", "DEVONTA_SMITH_1_NFL", "ou", "over", { draftkings: { odds: "-110", overUnder: "58.5" }, fanduel: { odds: "-115", overUnder: "58.5" }, prizepicks: { odds: "-119", overUnder: "64.5" } }),
-    sgoOdd("receiving_yards", "DEVONTA_SMITH_1_NFL", "ou", "under", { draftkings: { odds: "-110", overUnder: "58.5" }, fanduel: { odds: "-105", overUnder: "58.5" }, prizepicks: { odds: "-119", overUnder: "64.5" } }),
+    sgoOdd("receiving_yards", "DEVONTA_SMITH_1_NFL", "ou", "over", { draftkings: { odds: "-110", overUnder: "58.5", openOdds: "-112", openOverUnder: "56.5" }, fanduel: { odds: "-115", overUnder: "58.5" }, prizepicks: { odds: "-119", overUnder: "64.5" } }),
+    sgoOdd("receiving_yards", "DEVONTA_SMITH_1_NFL", "ou", "under", { draftkings: { odds: "-110", overUnder: "58.5", openOdds: "-108", openOverUnder: "56.5" }, fanduel: { odds: "-105", overUnder: "58.5" }, prizepicks: { odds: "-119", overUnder: "64.5" } }),
     sgoOdd("rushing_attempts", "DANDRE_SWIFT_1_NFL", "ou", "over", { betmgm: { odds: "+100", overUnder: "13.5" } }),
     sgoOdd("rushing_attempts", "DANDRE_SWIFT_1_NFL", "ou", "under", { betmgm: { odds: "-120", overUnder: "13.5" } }),
     sgoOdd("passing_completions", "JALEN_HURTS_1_NFL", "ou", "over", { caesars: { odds: "-110", overUnder: "19.5" } }),
@@ -69,7 +69,7 @@ const SGO_EVENT = {
     sgoOdd("points", "home", "ml", "home", { draftkings: { odds: "-150" } }),
   ].map((o) => [o.oddID, o])),
 };
-const sgo = { fail: false, calls: 0 };
+const sgo = { fail: false, calls: 0, closeCalls: 0 };
 
 function mockFetch(url: string, init?: RequestInit): Response {
   const u = new URL(url);
@@ -96,6 +96,20 @@ function mockFetch(url: string, init?: RequestInit): Response {
   if (u.host === "api.sportsgameodds.com") {
     expect(u.searchParams.get("apiKey")).toBeNull(); // key only in the header
     expect(new Headers(init?.headers).get("x-api-key")).toBe("sgo-key");
+    if (p === "/v2/events" && u.searchParams.get("eventIDs")) {
+      // Finished game: the books' official closing prices. Every prop closes 2 points higher.
+      sgo.closeCalls++;
+      expect(u.searchParams.get("eventIDs")).toBe("sgo-evt-1");
+      expect(u.searchParams.get("includeOpenCloseOdds")).toBe("true");
+      const odds = Object.fromEntries(Object.entries(SGO_EVENT.odds).map(([k, o]) => [k, {
+        ...o,
+        byBookmaker: Object.fromEntries(Object.entries(o.byBookmaker).map(([b, v]) => [b, {
+          ...v, odds: "+999", available: false, closeOdds: v.odds,
+          ...((v as { overUnder?: string }).overUnder ? { overUnder: "1.5", closeOverUnder: String(Number((v as { overUnder: string }).overUnder) + 2) } : {}),
+        }])),
+      }]));
+      return ok({ success: true, data: [{ ...SGO_EVENT, odds, status: { ...SGO_EVENT.status, started: true, finalized: true } }], nextCursor: null });
+    }
     if (p === "/v2/events") {
       sgo.calls++;
       if (sgo.fail) return new Response("err", { status: 500 });
@@ -135,6 +149,7 @@ beforeEach(() => {
   delete process.env.SGO_MONTHLY_LIMIT;
   sgo.fail = false;
   sgo.calls = 0;
+  sgo.closeCalls = 0;
 });
 
 describe("analysis pipeline", () => {
@@ -333,5 +348,58 @@ describe("analysis pipeline", () => {
     expect(sgo.calls).toBe(0);
     expect(s.sources.find((x) => x.key === "props")!.provider).toBe("The Odds API (backup)");
     expect(s.warnings.join(" ")).toMatch(/monthly limit/);
+  });
+  it("shops books, shows sportsbook opening lines, and records closing line value", async () => {
+    process.env.SPORTSGAMEODDS_API_KEY = "sgo-key";
+    for (let i = 0; i < 3; i++) await buildAnalysis(20_000);
+    const pre = await buildAnalysis(20_000);
+    const smith = pre.props.find((p) => p.player.name === "DeVonta Smith")!;
+    expect(smith.opening).toEqual({ line: 56.5, overPrice: -112, underPrice: -108, books: 1 });
+    expect(smith.shop!.map((o) => o.bookTitle).sort()).toEqual(["DraftKings", "FanDuel"]);
+    expect(smith.shop![0].ev).toBeGreaterThanOrEqual(smith.shop![1].ev);
+
+    const gamePicks = (await readLedger()).filter((p) => p.gameId === "401872963");
+    expect(gamePicks.length).toBeGreaterThan(0);
+    expect(gamePicks.every((p) => !p.close)).toBe(true);
+
+    const setState = (state: string) => {
+      const realFetch = globalThis.fetch;
+      vi.stubGlobal("fetch", vi.fn(async (input: string | URL, init?: RequestInit) => {
+        const res = await realFetch(input, init);
+        if (!/\/scoreboard/.test(String(input)) || /week=/.test(String(input))) return res;
+        const body = await res.json();
+        for (const e of body.events ?? []) if (e.id === "401872963") e.status.type.state = state;
+        return new Response(JSON.stringify(body), { status: 200 });
+      }));
+      return realFetch;
+    };
+
+    // Kickoff: every pick gets the last pregame line.
+    let realFetch = setState("in");
+    await writeJSON("espn/scoreboard/current", null as never);
+    await writeJSON("analysis/last-attempt", null as never);
+    await buildAnalysis(20_000);
+    vi.stubGlobal("fetch", realFetch);
+    let picks = (await readLedger()).filter((p) => p.gameId === "401872963");
+    expect(picks.every((p) => p.close?.source === "last-seen")).toBe(true);
+    expect(picks.every((p) => p.close!.lineMove === 0)).toBe(true);
+    expect(sgo.closeCalls).toBe(0);
+
+    // Final: replaced by the sportsbooks' official close, fetched once.
+    realFetch = setState("post");
+    await writeJSON("espn/scoreboard/current", null as never);
+    await writeJSON("analysis/last-attempt", null as never);
+    await buildAnalysis(20_000);
+    await buildAnalysis(20_000);
+    vi.stubGlobal("fetch", realFetch);
+    expect(sgo.closeCalls).toBe(1);
+    picks = (await readLedger()).filter((p) => p.gameId === "401872963");
+    const official = picks.filter((p) => p.close?.source === "sportsbook-close");
+    expect(official.length).toBeGreaterThan(0);
+    for (const p of official) {
+      if (p.market === "anytime_td") expect(p.close!.lineMove).toBe(0);
+      else expect(p.close!.lineMove).toBe(p.side === "over" ? 2 : -2);
+      expect(p.close!.beat).toBe(p.market === "anytime_td" ? p.close!.beat : p.side === "over");
+    }
   });
 });

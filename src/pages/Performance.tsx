@@ -12,7 +12,7 @@ function BucketTable({ rows, label }: { rows: PerformanceBucket[]; label: string
   return (
     <div className="overflow-x-auto scrollbar-thin">
       <table className="w-full text-sm">
-        <thead><tr className="text-left text-xs uppercase tracking-wide text-ink-3">{[label, "Picks", "W", "L", "P", "Hit rate", "Units"].map((h) => <th key={h} className="py-1.5 pr-3 font-medium">{h}</th>)}</tr></thead>
+        <thead><tr className="text-left text-xs uppercase tracking-wide text-ink-3">{[label, "Picks", "W", "L", "P", "Hit rate", "Units", "Beat close"].map((h) => <th key={h} className="py-1.5 pr-3 font-medium">{h}</th>)}</tr></thead>
         <tbody className="num">
           {rows.map((r) => (
             <tr key={r.key} className="border-t border-line">
@@ -20,11 +20,26 @@ function BucketTable({ rows, label }: { rows: PerformanceBucket[]; label: string
               <td className="pr-3">{r.picks}</td><td className="pr-3">{r.wins}</td><td className="pr-3">{r.losses}</td><td className="pr-3">{r.pushes}</td>
               <td className="pr-3 font-semibold">{fmtPct(r.hitRate, 1)}</td>
               <td className={`pr-3 ${r.units > 0 ? "text-strong" : r.units < 0 ? "text-negative" : ""}`}>{fmtSigned(r.units, 2)}</td>
+              <td className="pr-3 text-ink-2">{r.clvN ? `${r.clvBeat}/${r.clvN}` : "—"}</td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function CloseCell({ p }: { p: TrackedPick }) {
+  const c = p.close;
+  if (!c) return <span className="text-ink-3">{p.result === "pending" ? "at kickoff" : "—"}</span>;
+  const tone = c.beat === true ? "text-strong" : c.beat === false ? "text-negative" : "text-ink-2";
+  const what = p.market === "anytime_td" ? fmtOdds(p.side === "over" ? c.over : c.under) : `${c.line} ${fmtOdds(p.side === "over" ? c.over : c.under)}`;
+  const label = c.beat === true ? "Beat" : c.beat === false ? "Lost" : "Even";
+  return (
+    <span title={c.source === "sportsbook-close" ? "Sportsbooks' official closing line" : "Last pregame line this app fetched"}>
+      {what} <span className={`font-sans text-xs font-semibold ${tone}`}>{label}</span>
+      {c.source === "last-seen" && <span className="font-sans text-[10px] text-ink-3"> (last seen)</span>}
+    </span>
   );
 }
 
@@ -57,6 +72,22 @@ export default function Performance() {
         <Empty>No picks tracked yet. Picks are recorded automatically once sportsbook lines are connected and the analysis runs. Demo lines are never tracked.</Empty>
       ) : (
         <>
+          <Section title="Closing line value" subtitle="Did the market move toward the pick before kickoff? Beating the closing line consistently is the best early sign a model is sharp, long before win–loss records mean anything.">
+            <Card className="p-4">
+              {s.clv.tracked === 0 ? (
+                <p className="text-sm text-ink-3">No closing lines yet. Each pick gets one at kickoff; after the game it's replaced with the sportsbooks' official close.</p>
+              ) : (
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <Stat label="Beat the close" value={fmtPct(s.clv.beatRate, 1)} sub={`${s.clv.beat} beat · ${s.clv.lost} lost · ${s.clv.even} even`} />
+                  <Stat label="Picks with a close" value={s.clv.tracked} />
+                  <Stat label="Avg line move" value={s.clv.avgLineMove === null ? "—" : fmtSigned(s.clv.avgLineMove, 2)} sub="points in the pick's favor" />
+                  <Stat label="Avg price CLV" value={s.clv.avgProbClv === null ? "—" : fmtSigned(s.clv.avgProbClv * 100, 1, " pts")} sub="implied probability, same line" />
+                </div>
+              )}
+              <p className="mt-3 text-xs text-ink-3">A pick beats the close when the line moves toward its side (Over 58.5 closes at 60.5), or at the same line when its price gets more expensive. Above 50% over a large sample means the model tends to spot value before the market does. "Last seen" closes are the last line this app fetched before kickoff; they are upgraded to the official close after the game when SportsGameOdds has it.</p>
+            </Card>
+          </Section>
+
           <Section title="Does higher confidence win more often?" subtitle="Hit rate by confidence range (pushes and voids excluded). Small samples are noisy — judge after hundreds of graded picks, not dozens.">
             <Card className="p-4">
               <div className="h-64" role="img" aria-label="Hit rate by confidence range">
@@ -89,7 +120,7 @@ export default function Performance() {
           <Section title="Pick log" subtitle="As recorded at the time of the recommendation.">
             <Card className="overflow-x-auto p-4 scrollbar-thin">
               <table className="w-full text-sm">
-                <thead><tr className="text-left text-xs uppercase tracking-wide text-ink-3">{["Recorded", "Player", "Prop", "Pick", "Odds", "Proj", "Conf", "Actual", "Result"].map((h) => <th key={h} className="py-1.5 pr-3 font-medium">{h}</th>)}</tr></thead>
+                <thead><tr className="text-left text-xs uppercase tracking-wide text-ink-3">{["Recorded", "Player", "Prop", "Pick", "Odds", "Close", "Proj", "Conf", "Actual", "Result"].map((h) => <th key={h} className="py-1.5 pr-3 font-medium">{h}</th>)}</tr></thead>
                 <tbody className="num">
                   {s.recent.map((p) => (
                     <tr key={p.id} className="border-t border-line">
@@ -98,6 +129,7 @@ export default function Performance() {
                       <td className="pr-3 font-sans text-ink-2">{p.marketLabel}</td>
                       <td className="pr-3"><SideBadge side={p.side} label={p.market === "anytime_td" ? (p.side === "over" ? "YES" : "NO") : `${p.side === "over" ? "O" : "U"} ${p.line}`} /></td>
                       <td className="pr-3">{fmtOdds(p.odds)}</td>
+                      <td className="pr-3 whitespace-nowrap"><CloseCell p={p} /></td>
                       <td className="pr-3">{p.market === "anytime_td" ? fmtPct(p.projection, 0) : fmtFixed(p.projection)}</td>
                       <td className="pr-3 font-semibold">{p.confidence}</td>
                       <td className="pr-3">{p.actual ?? "—"}</td>

@@ -5,7 +5,7 @@ import type { TeammateOut } from "../../shared/model/projection";
 import { MARKETS, positionGroup } from "../../shared/model/markets";
 import { normName, shortKey } from "../../shared/names";
 import { sum } from "../../shared/model/stats";
-import { getConfig } from "../config";
+import { getConfig, type AppConfig } from "../config";
 import { readJSON, writeJSON, MIN } from "../cache";
 import { getCurrentSlate } from "./schedule";
 import { getDataset, datasetMeta } from "./dataset";
@@ -15,6 +15,7 @@ import { getGameWeather } from "./weather";
 import { getPropLines, groupQuotes } from "./props";
 import type { RawPropQuote } from "../providers/oddsApi";
 import { recordPicks, gradePicks } from "./tracking";
+import { frozenKey, recordClosingLines } from "./clv";
 import { recordHistory } from "./history";
 
 export interface AnalysisSnapshot {
@@ -43,7 +44,6 @@ export const isComplete = (q: SnapshotQuality | undefined) => !!q && q.datasetPe
 
 const SNAPSHOT_KEY = "analysis/current";
 const ATTEMPT_KEY = "analysis/last-attempt";
-const frozenKey = (gameId: string) => `frozen/${gameId}`;
 export const ANALYSIS_TTL = 15 * MIN;
 
 /** Everything the model needs, loaded once per build. */
@@ -300,7 +300,7 @@ export async function buildAnalysis(budgetMs = 20_000): Promise<AnalysisSnapshot
       quality.rosterTeamsMissing ? `${quality.rosterTeamsMissing} team rosters` : "",
       quality.injuriesOk ? "" : "injury reports",
     ].filter(Boolean).join(", ");
-    await gradeSafely([cur.dataset, ...(prior ? [prior] : [])]);
+    await gradeSafely([cur.dataset, ...(prior ? [prior] : [])], games, cfg);
     return { ...saved.value, warnings: [`Latest refresh came back incomplete (missing ${missing}); showing the last complete analysis instead.`, ...saved.value.warnings] };
   }
 
@@ -315,15 +315,21 @@ export async function buildAnalysis(budgetMs = 20_000): Promise<AnalysisSnapshot
       console.warn("history/tracking failed", e);
     }
   }
-  await gradeSafely([cur.dataset, ...(prior ? [prior] : [])]);
+  await gradeSafely([cur.dataset, ...(prior ? [prior] : [])], games, cfg);
   return snapshot;
 }
 
-async function gradeSafely(datasets: SeasonDataset[]) {
+async function gradeSafely(datasets: SeasonDataset[], games: Game[], cfg: AppConfig) {
   try {
     await gradePicks(datasets);
   } catch (e) {
     console.warn("grading failed", e);
+  }
+  try {
+    const r = await recordClosingLines(games, cfg);
+    for (const w of r.warnings) console.warn(w);
+  } catch (e) {
+    console.warn("closing lines failed", e);
   }
 }
 

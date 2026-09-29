@@ -52,6 +52,7 @@ export function groupQuotes(gameId: string, quotes: RawPropQuote[], fetchedAt: s
       return v.length ? Math.round(median(v)!) : null;
     };
     out.push({
+      opening: openingOf(g.market, g.books),
       gameId, playerName: g.playerName, playerId: null, team: null, market: g.market, line,
       overPrice: med(atLine.map((b) => b.overPrice)),
       underPrice: med(atLine.map((b) => b.underPrice)),
@@ -60,6 +61,24 @@ export function groupQuotes(gameId: string, quotes: RawPropQuote[], fetchedAt: s
     });
   }
   return out;
+}
+
+/** Consensus of the books' own opening lines (same rules as the current consensus). */
+export function openingOf(market: PropMarket, books: BookLine[]): PropLineGroup["opening"] {
+  const opens = books.map((b) => b.open).filter((o): o is NonNullable<BookLine["open"]> => !!o);
+  if (!opens.length) return null;
+  const isTd = market === "anytime_td";
+  const line = isTd ? 0.5 : consensusLine(opens.map((o) => o.line).filter((x): x is number => x !== null));
+  if (line === null) return null;
+  const at = isTd ? opens : opens.filter((o) => o.line === line);
+  const med = (xs: (number | null)[]) => {
+    const v = xs.filter((x): x is number => x !== null);
+    return v.length ? Math.round(median(v)!) : null;
+  };
+  const overPrice = med(at.map((o) => o.overPrice));
+  const underPrice = med(at.map((o) => o.underPrice));
+  if (overPrice === null && underPrice === null) return null;
+  return { line: isTd ? null : line, overPrice, underPrice, books: at.length };
 }
 
 type FirstSeenMap = Record<string, NonNullable<PropLineGroup["firstSeen"]>>;
@@ -130,6 +149,7 @@ export function matchSgoGame(g: Game, slate: SgoGame[]): SgoGame | undefined {
     (!e.startsAt || Math.abs(Date.parse(e.startsAt) - Date.parse(g.date)) < 18 * 3600_000));
 }
 
+export const sgoEventKey = (gameId: string) => `sgo/event/${gameId}`;
 export const sgoUsageKey = (d = new Date()) => `sgo/usage/${d.toISOString().slice(0, 7)}`;
 
 /**
@@ -173,7 +193,11 @@ async function getSgoLines(games: Game[], cfg: AppConfig, warnings: string[], ha
     if (!ev) continue;
     matched++;
     // Same cache key the backup uses, so props can be rebuilt after kickoff.
-    if (!slate.fromCache && ev.quotes.length) await writeJSON(`odds/props/${g.id}`, ev.quotes);
+    if (!slate.fromCache) {
+      if (ev.quotes.length) await writeJSON(`odds/props/${g.id}`, ev.quotes);
+      // Remembered so the official closing line can be fetched after the game.
+      await writeJSON(sgoEventKey(g.id), ev.eventID);
+    }
     const gs = groupQuotes(g.id, ev.quotes, slate.fetchedAt);
     await applyFirstSeen(g.id, gs);
     groups.push(...gs);

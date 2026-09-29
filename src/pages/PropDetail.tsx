@@ -2,7 +2,7 @@ import { Link, useParams } from "react-router-dom";
 import { useProp } from "../hooks/useApi";
 import { TrendChart } from "../charts/TrendChart";
 import { PlayerAvatar, TeamLogo } from "../components/Media";
-import { BooksTable, ConfidenceMeter, ConfidenceTable, HitRateGrid, LineMovement, SideBadge, TierBadge } from "../components/PropParts";
+import { BooksTable, WhereToBet, ConfidenceMeter, ConfidenceTable, HitRateGrid, LineMovement, SideBadge, TierBadge } from "../components/PropParts";
 import { InjuryTable, LinesTable, WeatherBadge } from "../components/GameParts";
 import { Freshness, Warnings } from "../components/Freshness";
 import { ScoreHistory } from "../components/ScoreHistory";
@@ -193,8 +193,9 @@ export default function PropDetail() {
           <Section title="Score history" subtitle="Why the confidence moved between refreshes." className="mb-0">
             <Card className="p-4"><ScoreHistory entries={history ?? []} unit={p.unit} /></Card>
           </Section>
+          <Section title="Where to bet" subtitle={`Every book pricing ${p.sideLabel}, best value first.`} className="mb-0"><Card className="p-4"><WhereToBet prop={p} /></Card></Section>
           <Section title="Line movement" className="mb-0"><Card className="p-4"><LineMovement prop={p} /></Card></Section>
-          <Section title="Sportsbooks" className="mb-0"><Card className="p-4"><BooksTable books={p.books} unit={p.unit} /></Card></Section>
+          <Section title="All sportsbook quotes" className="mb-0"><Card className="p-4"><BooksTable books={p.books} unit={p.unit} /></Card></Section>
           {game && (
             <>
               <Section title="Game lines" className="mb-0"><Card className="p-4"><LinesTable g={game} /></Card></Section>

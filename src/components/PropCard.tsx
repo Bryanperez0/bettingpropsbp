@@ -5,9 +5,12 @@ import { PlayerAvatar, TeamLogo } from "./Media";
 import { ConfidenceMeter, HitRateGrid, SideBadge, TierBadge } from "./PropParts";
 import { Pill } from "./ui";
 import { LiveTracker, propHasStarted } from "./LiveTracker";
+import { bestFor, useMyBooks } from "../hooks/useMyBooks";
 
 export function PropCard({ p, rank }: { p: SlimProp; rank?: number }) {
   const isProb = p.unit === "prob";
+  const { books: mine } = useMyBooks();
+  const best = propHasStarted(p) ? null : bestFor(p.shop, mine);
   return (
     <Link to={`/props/${encodeURIComponent(p.id)}`} className="group block rounded-xl border border-line bg-surface p-4 transition hover:border-ink-3 hover:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-over">
       <div className="flex items-start gap-3">
@@ -43,6 +46,13 @@ export function PropCard({ p, rank }: { p: SlimProp; rank?: number }) {
         <span className="num text-xs text-ink-3">{fmtOdds(p.odds.side)}</span>
         <span className="ml-auto"><TierBadge tier={p.tier} /></span>
       </div>
+      {best && (
+        <p className="mt-1.5 text-xs text-ink-3">
+          Best{mine.length ? " of your books" : ""}: <span className="font-medium text-ink-2">{best.bookTitle}</span>{" "}
+          <span className="num">{isProb ? "" : `${p.side === "over" ? "O" : "U"} ${best.line} `}{fmtOdds(best.price)}</span>
+          <span className={`num ml-1.5 ${best.ev > 0 ? "text-strong" : "text-negative"}`}>EV {fmtSigned(best.ev * 100, 1, "%")}</span>
+        </p>
+      )}
 
       <div className="mt-3 grid grid-cols-3 gap-2 text-center">
         <div className="rounded-lg bg-surface-2 py-1.5">

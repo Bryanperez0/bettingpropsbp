@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyzeProp, outcomeProbs } from "../shared/model/engine";
+import { analyzeProp, outcomeProbs, shopBooks } from "../shared/model/engine";
 import { project } from "../shared/model/projection";
 import { scoreConfidence, tierFor } from "../shared/model/confidence";
 import type { LeagueContext, TeamProfile } from "../shared/model/league";
@@ -230,5 +230,22 @@ describe("anytime TD is Yes-only", () => {
     expect(a.sideLabel).toMatch(/^YES/);
     expect(a.probEdge).toBeLessThan(0);
     expect(a.tier).toBe("negative");
+  });
+});
+
+describe("line shopping", () => {
+  it("values each book at its own line and ranks by expected value", () => {
+    const books = [
+      { book: "a", bookTitle: "A", line: 60.5, overPrice: -110, underPrice: -110, lastUpdate: null },
+      { book: "b", bookTitle: "B", line: 55.5, overPrice: -115, underPrice: -105, lastUpdate: null },
+      { book: "c", bookTitle: "C", line: 60.5, overPrice: 100, underPrice: -120, lastUpdate: null },
+      { book: "d", bookTitle: "D", line: 60.5, overPrice: null, underPrice: -110, lastUpdate: null },
+    ];
+    const shop = shopBooks(lineGroup({ books }), "over", 66, 18);
+    expect(shop.map((o) => o.book)).not.toContain("d"); // no Over price
+    // Five yards lower at B is worth more than the better price at C for a player projected at 66.
+    expect(shop[0].book).toBe("b");
+    expect(shop.find((o) => o.book === "c")!.ev).toBeGreaterThan(shop.find((o) => o.book === "a")!.ev);
+    expect(shop[0].winProb).toBeGreaterThan(shop.find((o) => o.book === "a")!.winProb);
   });
 });

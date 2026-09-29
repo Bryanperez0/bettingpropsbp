@@ -39,7 +39,10 @@ const BOOK_TITLES: Record<string, string> = {
 };
 const titleOf = (id: string) => BOOK_TITLES[id] ?? id.replace(/^./, (c) => c.toUpperCase());
 
-interface SgoBookOdds { odds?: string; overUnder?: string; available?: boolean; lastUpdatedAt?: string; isMainLine?: boolean }
+interface SgoBookOdds {
+  odds?: string; overUnder?: string; available?: boolean; lastUpdatedAt?: string; isMainLine?: boolean;
+  openOdds?: string; openOverUnder?: string; closeOdds?: string; closeOverUnder?: string;
+}
 interface SgoOdd {
   oddID?: string; statID?: string; statEntityID?: string; playerID?: string; periodID?: string;
   betTypeID?: string; sideID?: string; byBookmaker?: Record<string, SgoBookOdds>;
@@ -85,9 +88,15 @@ function teamNames(t: SgoTeam | undefined): string[] {
   return [t.names?.long, t.names?.medium, t.names?.short, fromId].filter((x): x is string => !!x);
 }
 
-export function parseSgoEvent(ev: SgoEvent): SgoGame | null {
+/**
+ * Converts one event's odds into quotes. mode "closing" reads the books'
+ * official closing line and prices (includeOpenCloseOdds) instead of the
+ * current ones, for closing line value on finished games.
+ */
+export function parseSgoEvent(ev: SgoEvent, mode: "current" | "closing" = "current"): SgoGame | null {
   if (!ev.eventID) return null;
-  const books = new Map<string, { playerName: string; market: PropMarket; book: string; line: number | null; over: number | null; under: number | null; lastUpdate: string | null }>();
+  type Acc = { playerName: string; market: PropMarket; book: string; line: number | null; over: number | null; under: number | null; lastUpdate: string | null; openLine: number | null; openOver: number | null; openUnder: number | null; hasOpen: boolean };
+  const books = new Map<string, Acc>();
   for (const odd of Object.values(ev.odds ?? {})) {
     const market = odd.statID ? SGO_STATS[odd.statID] : undefined;
     if (!market || odd.periodID !== "game") continue;
@@ -100,13 +109,24 @@ export function parseSgoEvent(ev: SgoEvent): SgoGame | null {
     const isUnder = odd.sideID === "under" || odd.sideID === "no";
     if (!isOver && !isUnder) continue;
     for (const [bookId, b] of Object.entries(odd.byBookmaker ?? {})) {
-      if (EXCLUDED_BOOKS.has(bookId) || b.available === false || b.isMainLine === false) continue;
-      const line = market === "anytime_td" ? null : price(b.overUnder);
+      if (EXCLUDED_BOOKS.has(bookId) || b.isMainLine === false) continue;
+      const closing = mode === "closing";
+      // A finished game's markets are closed, so "available" only matters for current prices.
+      if (!closing && b.available === false) continue;
+      const odds = closing ? b.closeOdds : b.odds;
+      const line = market === "anytime_td" ? null : price(closing ? b.closeOverUnder : b.overUnder);
       if (market !== "anytime_td" && line === null) continue;
+      if (price(odds) === null) continue;
       const key = `${player}|${market}|${bookId}|${line ?? ""}`;
-      const g = books.get(key) ?? { playerName, market, book: bookId, line, over: null, under: null, lastUpdate: null };
-      if (isOver) g.over = price(b.odds);
-      else g.under = price(b.odds);
+      const g = books.get(key) ?? { playerName, market, book: bookId, line, over: null, under: null, lastUpdate: null, openLine: null, openOver: null, openUnder: null, hasOpen: false };
+      if (isOver) g.over = price(odds);
+      else g.under = price(odds);
+      if (!closing && price(b.openOdds) !== null) {
+        g.hasOpen = true;
+        if (market !== "anytime_td") g.openLine = price(b.openOverUnder);
+        if (isOver) g.openOver = price(b.openOdds);
+        else g.openUnder = price(b.openOdds);
+      }
       if (b.lastUpdatedAt && (!g.lastUpdate || b.lastUpdatedAt > g.lastUpdate)) g.lastUpdate = b.lastUpdatedAt;
       books.set(key, g);
     }
@@ -116,7 +136,10 @@ export function parseSgoEvent(ev: SgoEvent): SgoGame | null {
     .map((g) => ({
       playerName: g.playerName,
       market: g.market,
-      book: { book: g.book, bookTitle: titleOf(g.book), line: g.line, overPrice: g.over, underPrice: g.under, lastUpdate: g.lastUpdate },
+      book: {
+        book: g.book, bookTitle: titleOf(g.book), line: g.line, overPrice: g.over, underPrice: g.under, lastUpdate: g.lastUpdate,
+        open: g.hasOpen ? { line: g.openLine, overPrice: g.openOver, underPrice: g.openUnder } : null,
+      },
     }));
   return {
     eventID: ev.eventID,
@@ -143,6 +166,7 @@ export async function fetchSgoSlate(apiKey: string, startsBefore: Date): Promise
       startsAfter: new Date().toISOString(),
       startsBefore: startsBefore.toISOString(),
       oddID: SGO_ODD_IDS.join(","),
+      includeOpenCloseOdds: "true",
       limit: "50",
     });
     if (cursor) q.set("cursor", cursor);
@@ -158,6 +182,23 @@ export async function fetchSgoSlate(apiKey: string, startsBefore: Date): Promise
     if (!cursor || !events.length) break;
   }
   return { games, objects };
+}
+
+/**
+ * Official closing lines for finished games (one billed object per event).
+ * Returns eventID -> quotes built from the books' closing prices.
+ */
+export async function fetchSgoClosing(apiKey: string, eventIDs: string[]): Promise<{ games: SgoGame[]; objects: number }> {
+  const q = new URLSearchParams({
+    eventIDs: eventIDs.join(","),
+    oddID: SGO_ODD_IDS.join(","),
+    includeOpenCloseOdds: "true",
+    limit: String(Math.max(1, eventIDs.length)),
+  });
+  const { data } = await fetchJson<SgoPage>(`${BASE}/events?${q}`, { timeoutMs: 15000, headers: { "x-api-key": apiKey } });
+  if (data.success === false) throw new Error(`SportsGameOdds: ${data.error ?? "request failed"}`);
+  const events = data.data ?? [];
+  return { games: events.map((e) => parseSgoEvent(e, "closing")).filter((g): g is SgoGame => !!g), objects: events.length };
 }
 
 export interface SgoUsage { tier: string | null; active: boolean | null; monthUsed: number | null; monthMax: number | null }

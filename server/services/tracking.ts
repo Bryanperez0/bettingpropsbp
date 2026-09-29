@@ -1,13 +1,15 @@
-import type { AnalyzedProp, PerformanceBucket, PerformanceSummary, SeasonDataset, TrackedPick } from "../../shared/types";
+import type { AnalyzedProp, ClosingLine, ClvSummary, PerformanceBucket, PerformanceSummary, SeasonDataset, TrackedPick } from "../../shared/types";
 import { MARKETS } from "../../shared/model/markets";
 import { isActionable } from "../../shared/model/engine";
-import { unitsWon } from "../../shared/model/stats";
+import { americanToProb, mean, noVig, round, unitsWon } from "../../shared/model/stats";
 import { normName } from "../../shared/names";
 import { readJSON, writeJSON } from "../cache";
 
 const LEDGER_KEY = "ledger/v1";
 /** Props at or above this confidence are logged, so ranges can be compared. */
 export const TRACK_MIN_CONFIDENCE = 50;
+
+export { LEDGER_KEY };
 
 export async function readLedger(): Promise<TrackedPick[]> {
   return (await readJSON<TrackedPick[]>(LEDGER_KEY))?.value ?? [];
@@ -36,7 +38,7 @@ export function selectNewPicks(ledger: TrackedPick[], props: AnalyzedProp[], now
       id, createdAt: now, gameId: p.gameId, kickoff: p.kickoff, season: p.season, week: p.week,
       playerId: p.player.id, playerName: p.player.name, team: p.player.team, opponent: p.opponent, position: p.player.position,
       market: p.market, marketLabel: p.marketLabel, category: p.category, side: p.side, line: p.line,
-      odds: p.odds.side, projection: p.projection, confidence: p.confidence.total, tier: p.tier, modelProb: p.modelProb,
+      odds: p.odds.side, projection: p.projection, confidence: p.confidence.total, tier: p.tier, modelProb: p.modelProb, impliedProb: p.impliedProb,
       result: "pending", actual: null, gradedAt: null,
     });
   }
@@ -48,6 +50,50 @@ export async function recordPicks(props: AnalyzedProp[], now: string): Promise<n
   const added = selectNewPicks(ledger, props, now);
   if (added.length) await writeJSON(LEDGER_KEY, [...ledger, ...added]);
   return added.length;
+}
+
+/**
+ * Closing line value for one pick. The pick beat the close when the line
+ * moved toward its side (e.g. Over 58.5 closed at 60.5), or, at the same
+ * line, when the market price for its side got more expensive (the market
+ * moved toward the pick). Differences under half a point of probability count as even.
+ */
+export function computeClose(
+  pick: Pick<TrackedPick, "market" | "side" | "line" | "odds" | "impliedProb">,
+  close: { line: number; over: number | null; under: number | null },
+  source: ClosingLine["source"],
+  at: string,
+): ClosingLine {
+  const isTd = pick.market === "anytime_td";
+  const lineMove = isTd ? 0 : round(pick.side === "over" ? close.line - pick.line : pick.line - close.line, 1);
+  const closeSide = pick.side === "over" ? close.over : close.under;
+  let probClv: number | null = null;
+  if (lineMove === 0) {
+    // Compare like with like: vig removed on both ends when possible, raw prices otherwise.
+    const nv = noVig(close.over, close.under);
+    const noVigBoth = nv && pick.impliedProb !== null && pick.impliedProb !== undefined;
+    const closeP = noVigBoth ? nv![pick.side === "over" ? 0 : 1] : americanToProb(closeSide);
+    const pickP = noVigBoth ? pick.impliedProb! : americanToProb(pick.odds);
+    if (closeP !== null && pickP !== null) probClv = round(closeP - pickP, 3);
+  }
+  const beat = lineMove > 0 ? true : lineMove < 0 ? false
+    : probClv === null ? null : probClv > 0.005 ? true : probClv < -0.005 ? false : null;
+  return { line: isTd ? 0.5 : close.line, over: close.over, under: close.under, source, at, lineMove, probClv, beat };
+}
+
+export function summarizeClv(picks: TrackedPick[]): ClvSummary {
+  const withClose = picks.filter((p) => p.close);
+  const beat = withClose.filter((p) => p.close!.beat === true).length;
+  const lost = withClose.filter((p) => p.close!.beat === false).length;
+  const moves = withClose.filter((p) => p.market !== "anytime_td").map((p) => p.close!.lineMove);
+  const probs = withClose.map((p) => p.close!.probClv).filter((x): x is number => x !== null);
+  const avg = (xs: number[], d: number) => { const m = mean(xs); return m === null ? null : round(m, d); };
+  return {
+    tracked: withClose.length, beat, lost, even: withClose.length - beat - lost,
+    beatRate: beat + lost ? round(beat / (beat + lost), 3) : null,
+    avgLineMove: avg(moves, 2),
+    avgProbClv: avg(probs, 3),
+  };
 }
 
 /** Grade one pick against a final box score. */
@@ -82,7 +128,11 @@ function bucket(key: string, label: string, picks: TrackedPick[]): PerformanceBu
   const losses = graded.filter((p) => p.result === "loss").length;
   const pushes = graded.filter((p) => p.result === "push").length;
   const units = graded.reduce((a, p) => a + (p.result === "win" ? unitsWon(p.odds) : p.result === "loss" ? -1 : 0), 0);
-  return { key, label, picks: picks.length, wins, losses, pushes, hitRate: wins + losses ? wins / (wins + losses) : null, units: Math.round(units * 100) / 100 };
+  const clv = picks.filter((p) => p.close);
+  return {
+    key, label, picks: picks.length, wins, losses, pushes, hitRate: wins + losses ? wins / (wins + losses) : null, units: Math.round(units * 100) / 100,
+    clvN: clv.length, clvBeat: clv.filter((p) => p.close!.beat === true).length,
+  };
 }
 
 export const CONFIDENCE_RANGES: [number, number][] = [[90, 100], [80, 89], [70, 79], [60, 69], [50, 59]];
@@ -103,6 +153,7 @@ export function summarize(ledger: TrackedPick[]): PerformanceSummary {
     pushes: all.pushes,
     hitRate: all.hitRate,
     units: all.units,
+    clv: summarizeClv(ledger),
     byConfidence: CONFIDENCE_RANGES.map(([lo, hi]) => bucket(`${lo}-${hi}`, `${lo}–${hi}`, ledger.filter((p) => p.confidence >= lo && p.confidence <= hi))),
     byCategory: group((p) => p.marketLabel),
     byPosition: group((p) => p.position || "?"),

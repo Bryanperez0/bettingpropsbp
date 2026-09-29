@@ -238,6 +238,23 @@ export interface BookLine {
   overPrice: number | null;
   underPrice: number | null;
   lastUpdate: string | null;
+  /** The book's opening line and prices, when the provider reports them. */
+  open?: { line: number | null; overPrice: number | null; underPrice: number | null } | null;
+}
+
+/** Consensus opening line across books (from the sportsbooks, not this app). */
+export interface OpeningLine { line: number | null; overPrice: number | null; underPrice: number | null; books: number }
+
+/** One book's price for the recommended side, valued with the model's probability at that book's line. */
+export interface BookOption {
+  book: string;
+  bookTitle: string;
+  line: number;
+  price: number;
+  /** Model probability the bet wins at this book's line. */
+  winProb: number;
+  /** Expected profit per 1 unit staked (0.05 = +5%). */
+  ev: number;
 }
 
 /** A normalized prop line for one player/market, possibly quoted by several books. */
@@ -255,6 +272,7 @@ export interface PropLineGroup {
   source: LineSource;
   fetchedAt: string;
   firstSeen: { line: number | null; overPrice: number | null; underPrice: number | null; at: string } | null;
+  opening?: OpeningLine | null;
 }
 
 export interface HitRate {
@@ -331,7 +349,10 @@ export interface AnalyzedProp {
   sideLabel: string;
   odds: { over: number | null; under: number | null; side: number | null };
   books: BookLine[];
+  /** Books pricing the recommended side, best expected value first. */
+  shop?: BookOption[];
   firstSeen: PropLineGroup["firstSeen"];
+  opening?: OpeningLine | null;
   projection: number;
   /** For anytime TD the projection is a probability (0-1) and unit is "prob". */
   unit: "yards" | "count" | "prob";
@@ -424,9 +445,38 @@ export interface TrackedPick {
   confidence: number;
   tier: EdgeTier;
   modelProb: number;
+  /** Market probability of the picked side when recorded (vig removed when both sides were priced). */
+  impliedProb?: number | null;
+  /** Closing line value: how the market moved between the pick and kickoff. */
+  close?: ClosingLine | null;
   result: PickResult;
   actual: number | null;
   gradedAt: string | null;
+}
+
+export interface ClosingLine {
+  line: number;
+  over: number | null;
+  under: number | null;
+  /** "sportsbook-close": the books' official closing prices. "last-seen": the last pregame line this app fetched. */
+  source: "sportsbook-close" | "last-seen";
+  at: string;
+  /** Line points in the pick's favor (+ means the pick got a better number than the close). 0 for anytime TD. */
+  lineMove: number;
+  /** Closing minus recorded market probability for the picked side, at the same line. null if the line moved. */
+  probClv: number | null;
+  /** true = beat the closing line, false = lost to it, null = even. */
+  beat: boolean | null;
+}
+
+export interface ClvSummary {
+  tracked: number;
+  beat: number;
+  lost: number;
+  even: number;
+  beatRate: number | null;
+  avgLineMove: number | null;
+  avgProbClv: number | null;
 }
 
 export interface PerformanceBucket {
@@ -438,6 +488,9 @@ export interface PerformanceBucket {
   pushes: number;
   hitRate: number | null;
   units: number;
+  /** Picks with a closing line, and how many beat it. */
+  clvN: number;
+  clvBeat: number;
 }
 
 export interface PerformanceSummary {
@@ -449,6 +502,7 @@ export interface PerformanceSummary {
   pushes: number;
   hitRate: number | null;
   units: number;
+  clv: ClvSummary;
   byConfidence: PerformanceBucket[];
   byCategory: PerformanceBucket[];
   byPosition: PerformanceBucket[];

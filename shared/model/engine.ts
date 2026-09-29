@@ -1,10 +1,10 @@
-import type { AnalyzedProp, PlayerGameLog, PropLineGroup, PropSide, WeatherInfo } from "../types";
+import type { AnalyzedProp, BookOption, PlayerGameLog, PropLineGroup, PropSide, WeatherInfo } from "../types";
 import { MARKETS } from "./markets";
 import type { LeagueContext } from "./league";
 import { project, type TeammateOut } from "./projection";
 import { buildHistory, computeHitRates } from "./hitRate";
 import { scoreConfidence, tierFor, DEFAULT_IMPLIED } from "./confidence";
-import { americanToProb, clamp, mean, median, noVig, normalCdf, poissonCdf, round } from "./stats";
+import { americanToProb, clamp, mean, median, noVig, normalCdf, poissonCdf, round, unitsWon } from "./stats";
 
 export interface AnalyzeInput {
   line: PropLineGroup;
@@ -113,6 +113,7 @@ export function analyzeProp(input: AnalyzeInput): AnalyzedProp | null {
   const impliedProb = side === "over" ? impliedOver : impliedUnder;
   const sidePrice = side === "over" ? input.line.overPrice : input.line.underPrice;
   const probEdge = modelProb - (impliedProb ?? DEFAULT_IMPLIED);
+  const shop = shopBooks(input.line, side, proj.mean, proj.sd);
 
   const history = buildHistory(input.logs, input.line.market, line);
   const hitRates = computeHitRates(history, side, input.season);
@@ -215,7 +216,9 @@ export function analyzeProp(input: AnalyzeInput): AnalyzedProp | null {
     sideLabel: sideLabel(input.line.market, side, line),
     odds: { over: input.line.overPrice, under: input.line.underPrice, side: sidePrice },
     books: input.line.books,
+    shop,
     firstSeen: input.line.firstSeen,
+    opening: input.line.opening ?? null,
     projection: round(projection, isProb ? 3 : 1),
     unit: cfg.unit,
     edge: round(edge, isProb ? 3 : 1),
@@ -251,6 +254,25 @@ export function analyzeProp(input: AnalyzeInput): AnalyzedProp | null {
     dataQuality: { score: round(quality, 2), missing: proj.missing },
     generatedAt: input.now,
   };
+}
+
+/**
+ * Line shopping: value the recommended side at every book using the model's
+ * probability at THAT book's line, so a better number and a better price are
+ * compared on the same scale (expected profit per unit).
+ */
+export function shopBooks(line: PropLineGroup, side: PropSide, mu: number, sd: number | null): BookOption[] {
+  const out: BookOption[] = [];
+  for (const b of line.books) {
+    const price = side === "over" ? b.overPrice : b.underPrice;
+    const at = line.market === "anytime_td" ? 0.5 : b.line;
+    if (price === null || at === null) continue;
+    const pr = outcomeProbs(line.market, mu, sd, at);
+    const win = side === "over" ? pr.over : pr.under;
+    const lose = side === "over" ? pr.under : pr.over;
+    out.push({ book: b.book, bookTitle: b.bookTitle, line: at, price, winProb: round(win, 3), ev: round(win * unitsWon(price) - lose, 3) });
+  }
+  return out.sort((a, b) => b.ev - a.ev || a.bookTitle.localeCompare(b.bookTitle));
 }
 
 const roundOrNull = (x: number | null) => (x === null ? null : round(x, 1));

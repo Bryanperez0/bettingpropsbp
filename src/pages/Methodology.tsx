@@ -63,6 +63,17 @@ export default function Methodology() {
         </Card>
       </Section>
 
+      <Section title="Line shopping and closing line value">
+        <Card className="p-4">
+          <P>
+            <b className="text-ink">Where to bet.</b> For the recommended side, every book is valued with the model's probability at that book's own line, then converted to expected value (EV): win chance × payout − loss chance, per $1 staked. That puts a better number (Over 55.5 vs 56.5) and a better price (−105 vs −115) on the same scale. Choose your books under "My books" on any prop page; the choice stays in your browser. EV is only as good as the model, so read it alongside Model Performance.
+          </P>
+          <P>
+            <br /><b className="text-ink">Closing line value (CLV).</b> Each tracked pick gets a closing line at kickoff (the last pregame line this app fetched), which is replaced after the game by the sportsbooks' official close from SportsGameOdds when available. A pick beats the close when the line moved toward its side, or at the same line when its price got more expensive (vig removed). Consistently beating the close is the earliest reliable sign of a sharp model; win–loss records take hundreds of picks to mean anything.
+          </P>
+        </Card>
+      </Section>
+
       <Section title="Data labels">
         <Card className="p-4">
           <ul className="space-y-1.5 text-sm">
