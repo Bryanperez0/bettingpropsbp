@@ -7,7 +7,7 @@ export function StatusBanner({ status }: { status: StatusInfo }) {
     items.push({
       tone: "border-negative/40 bg-negative/5",
       title: "Sportsbook prop lines are not connected",
-      body: "Set ODDS_API_KEY in your Netlify environment variables to load real player prop lines. Until then the app shows schedules, stats, injuries and weather, but no prop recommendations.",
+      body: "Set SPORTSGAMEODDS_API_KEY (or ODDS_API_KEY) in your Netlify environment variables to load real player prop lines. Until then the app shows schedules, stats, injuries and weather, but no prop recommendations.",
     });
   }
   if (status.demoLines) {

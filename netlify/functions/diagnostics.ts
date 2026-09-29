@@ -2,6 +2,8 @@ import type { Config } from "@netlify/functions";
 import { getConfig } from "../../server/config";
 import { readJSON, storageHealth, writeJSON } from "../../server/cache";
 import { ESPN_HOSTS } from "../../server/providers/espn";
+import { fetchSgoUsage } from "../../server/providers/sportsGameOdds";
+import { HttpError } from "../../server/http";
 
 /**
  * Connection check for every data source. Reports HTTP status codes only;
@@ -60,13 +62,33 @@ export default async () => {
       ms: Math.max(...pair.map((c) => c.ms)),
     });
   }
+  if (cfg.sgoApiKey) {
+    // The usage endpoint does not use monthly objects.
+    const t0 = Date.now();
+    try {
+      const u = await fetchSgoUsage(cfg.sgoApiKey);
+      checks.push({
+        name: "SportsGameOdds (player props)", ok: u.active !== false, status: u.active === false ? "Inactive key" : "HTTP 200", ms: Date.now() - t0,
+        detail: u.active === false ? "Key found but not active" :
+          `Key accepted${u.tier ? ` (${u.tier} plan)` : ""}. Objects used this month: ${u.monthUsed ?? "unknown"}${u.monthMax ? ` of ${u.monthMax.toLocaleString("en-US")}` : ""}`,
+      });
+    } catch (e) {
+      const status = e instanceof HttpError ? e.status : null;
+      checks.push({
+        name: "SportsGameOdds (player props)", ok: false, status: status ? `HTTP ${status}` : "No response", ms: Date.now() - t0,
+        detail: status === 401 ? "Unauthorized: the API key is wrong or inactive" : status === 429 ? "Rate limited / monthly limit reached" : status ? "Provider returned an error" : (e as Error).message,
+      });
+    }
+  } else {
+    checks.push({ name: "SportsGameOdds (player props)", ok: false, status: "Not configured", detail: "SPORTSGAMEODDS_API_KEY is not set in Netlify environment variables", ms: 0 });
+  }
   if (cfg.oddsApiKey) {
     // The /sports list does not use credits.
-    const c = await probe("The Odds API (player props)", `https://api.the-odds-api.com/v4/sports?apiKey=${encodeURIComponent(cfg.oddsApiKey)}`,
+    const c = await probe(cfg.sgoApiKey ? "The Odds API (backup props)" : "The Odds API (player props)", `https://api.the-odds-api.com/v4/sports?apiKey=${encodeURIComponent(cfg.oddsApiKey)}`,
       (res) => `Key accepted. Credits remaining: ${res.headers.get("x-requests-remaining") ?? "unknown"}`);
     checks.push(c);
   } else {
-    checks.push({ name: "The Odds API (player props)", ok: false, status: "Not configured", detail: "ODDS_API_KEY is not set in Netlify environment variables", ms: 0 });
+    checks.push({ name: "The Odds API (backup props)", ok: !!cfg.sgoApiKey, status: "Not configured", detail: cfg.sgoApiKey ? "Optional backup; ODDS_API_KEY is not set" : "ODDS_API_KEY is not set in Netlify environment variables", ms: 0 });
   }
   checks.push(await probe("Open-Meteo (weather)", "https://api.open-meteo.com/v1/forecast?latitude=41.86&longitude=-87.62&hourly=temperature_2m&forecast_days=1"));
 

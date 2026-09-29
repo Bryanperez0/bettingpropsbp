@@ -24,14 +24,14 @@ export interface FetchResult<T> {
 }
 
 /** fetch + JSON with a timeout and one retry on network/5xx errors. */
-export async function fetchJson<T>(url: string, opts: { timeoutMs?: number; retries?: number } = {}): Promise<FetchResult<T>> {
+export async function fetchJson<T>(url: string, opts: { timeoutMs?: number; retries?: number; headers?: Record<string, string> } = {}): Promise<FetchResult<T>> {
   const { timeoutMs = 8000, retries = 1 } = opts;
   let lastErr: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
-      const res = await fetch(url, { signal: ctrl.signal, headers: HEADERS });
+      const res = await fetch(url, { signal: ctrl.signal, headers: { ...HEADERS, ...opts.headers } });
       if (!res.ok) {
         const err = new HttpError(res.status, url);
         if (res.status >= 500 && attempt < retries) { lastErr = err; continue; }

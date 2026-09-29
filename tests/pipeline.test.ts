@@ -40,7 +40,38 @@ const TEST_ODDS = {
   ],
 };
 
-function mockFetch(url: string): Response {
+// Synthetic SportsGameOdds event in its documented v2 shape (TEST DATA ONLY).
+const sgoOdd = (stat: string, player: string, bet: string, side: string, books: Record<string, { odds: string; overUnder?: string }>) => ({
+  oddID: `${stat}-${player}-game-${bet}-${side}`, statID: stat, statEntityID: player, playerID: player, periodID: "game", betTypeID: bet, sideID: side,
+  byBookmaker: Object.fromEntries(Object.entries(books).map(([k, v]) => [k, { ...v, available: true, lastUpdatedAt: "2026-09-28T18:00:00Z" }])),
+});
+const SGO_EVENT = {
+  eventID: "sgo-evt-1", leagueID: "NFL",
+  status: { startsAt: "2026-09-29T00:15:00.000Z", started: false },
+  teams: {
+    home: { teamID: "CHICAGO_BEARS_NFL", names: { long: "Chicago Bears", medium: "Bears", short: "CHI" } },
+    away: { teamID: "PHILADELPHIA_EAGLES_NFL", names: { short: "PHI" } },
+  },
+  players: {
+    DEVONTA_SMITH_1_NFL: { playerID: "DEVONTA_SMITH_1_NFL", name: "DeVonta Smith", teamID: "PHILADELPHIA_EAGLES_NFL" },
+    DANDRE_SWIFT_1_NFL: { playerID: "DANDRE_SWIFT_1_NFL", firstName: "D'Andre", lastName: "Swift" },
+    JALEN_HURTS_1_NFL: { playerID: "JALEN_HURTS_1_NFL", name: "Jalen Hurts" },
+  },
+  odds: Object.fromEntries([
+    sgoOdd("receiving_yards", "DEVONTA_SMITH_1_NFL", "ou", "over", { draftkings: { odds: "-110", overUnder: "58.5" }, fanduel: { odds: "-115", overUnder: "58.5" }, prizepicks: { odds: "-119", overUnder: "64.5" } }),
+    sgoOdd("receiving_yards", "DEVONTA_SMITH_1_NFL", "ou", "under", { draftkings: { odds: "-110", overUnder: "58.5" }, fanduel: { odds: "-105", overUnder: "58.5" }, prizepicks: { odds: "-119", overUnder: "64.5" } }),
+    sgoOdd("rushing_attempts", "DANDRE_SWIFT_1_NFL", "ou", "over", { betmgm: { odds: "+100", overUnder: "13.5" } }),
+    sgoOdd("rushing_attempts", "DANDRE_SWIFT_1_NFL", "ou", "under", { betmgm: { odds: "-120", overUnder: "13.5" } }),
+    sgoOdd("passing_completions", "JALEN_HURTS_1_NFL", "ou", "over", { caesars: { odds: "-110", overUnder: "19.5" } }),
+    sgoOdd("passing_completions", "JALEN_HURTS_1_NFL", "ou", "under", { caesars: { odds: "-110", overUnder: "19.5" } }),
+    sgoOdd("touchdowns", "DANDRE_SWIFT_1_NFL", "yn", "yes", { draftkings: { odds: "+140" }, kalshi: { odds: "+200" } }),
+    sgoOdd("touchdowns", "DANDRE_SWIFT_1_NFL", "yn", "no", { draftkings: { odds: "-180" } }),
+    sgoOdd("points", "home", "ml", "home", { draftkings: { odds: "-150" } }),
+  ].map((o) => [o.oddID, o])),
+};
+const sgo = { fail: false, calls: 0 };
+
+function mockFetch(url: string, init?: RequestInit): Response {
   const u = new URL(url);
   const p = u.pathname;
   if (u.host === "site.api.espn.com") {
@@ -62,6 +93,17 @@ function mockFetch(url: string): Response {
     }
     if (p.endsWith("/injuries")) return notFound(); // exercise the summary fallback
   }
+  if (u.host === "api.sportsgameodds.com") {
+    expect(u.searchParams.get("apiKey")).toBeNull(); // key only in the header
+    expect(new Headers(init?.headers).get("x-api-key")).toBe("sgo-key");
+    if (p === "/v2/events") {
+      sgo.calls++;
+      if (sgo.fail) return new Response("err", { status: 500 });
+      expect(u.searchParams.get("leagueID")).toBe("NFL");
+      expect(u.searchParams.get("oddID")).toContain("receiving_longestReception-PLAYER_ID-game-ou-over");
+      return ok({ success: true, data: [SGO_EVENT], nextCursor: null });
+    }
+  }
   if (u.host === "api.the-odds-api.com") {
     expect(u.searchParams.get("apiKey")).toBe("test-key");
     if (p.endsWith("/events")) return ok([TEST_ODDS_EVENT]);
@@ -78,7 +120,7 @@ function mockFetch(url: string): Response {
 beforeAll(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-09-28T19:00:00Z"));
-  vi.stubGlobal("fetch", vi.fn(async (input: string | URL) => mockFetch(String(input))));
+  vi.stubGlobal("fetch", vi.fn(async (input: string | URL, init?: RequestInit) => mockFetch(String(input), init)));
 });
 afterAll(() => {
   vi.useRealTimers();
@@ -89,6 +131,10 @@ beforeEach(() => {
   process.env.INCLUDE_PRIOR_SEASON = "false";
   process.env.ODDS_API_BOOKMAKERS = "";
   delete process.env.DEMO_PROP_LINES;
+  delete process.env.SPORTSGAMEODDS_API_KEY;
+  delete process.env.SGO_MONTHLY_LIMIT;
+  sgo.fail = false;
+  sgo.calls = 0;
 });
 
 describe("analysis pipeline", () => {
@@ -97,7 +143,7 @@ describe("analysis pipeline", () => {
     const s = await buildAnalysis(20_000);
     expect(s.props).toHaveLength(0);
     expect(s.sources.find((x) => x.key === "props")!.status).toBe("unavailable");
-    expect(s.warnings.join(" ")).toMatch(/ODDS_API_KEY is not configured/);
+    expect(s.warnings.join(" ")).toMatch(/no odds API key is configured/);
     expect(s.games.length).toBe(16);
   });
 
@@ -244,5 +290,48 @@ describe("analysis pipeline", () => {
     const swift = after.props.find((p) => p.player.name === "D'Andre Swift" && p.market === "rush_yds");
     expect(swift?.frozen?.state).toBe("in");
     expect(swift?.line).toBe(55.5);
+  });
+  it("uses SportsGameOdds as the main source: all prop types, sportsbooks only, one request per refresh", async () => {
+    process.env.SPORTSGAMEODDS_API_KEY = "sgo-key";
+    process.env.ODDS_API_KEY = "test-key";
+    for (let i = 0; i < 3; i++) await buildAnalysis(20_000);
+    const s = await buildAnalysis(20_000);
+    const meta = s.sources.find((x) => x.key === "props")!;
+    expect(meta.provider).toBe("SportsGameOdds");
+    expect(sgo.calls).toBe(1); // later builds read the cached slate
+    const names = s.props.map((p) => `${p.player.name}:${p.market}`);
+    expect(names).toContain("DeVonta Smith:rec_yds");
+    expect(names).toContain("D'Andre Swift:rush_attempts");
+    expect(names).toContain("Jalen Hurts:pass_completions");
+    const smith = s.props.find((p) => p.player.name === "DeVonta Smith")!;
+    expect(smith.line).toBe(58.5); // PrizePicks' 64.5 is not a sportsbook line
+    expect(smith.books.map((b) => b.bookTitle)).toEqual(["DraftKings", "FanDuel"]);
+    expect(smith.odds.over).toBe(-112); // median of -110 and -115, rounded
+    const td = s.props.find((p) => p.player.name === "D'Andre Swift" && p.market === "anytime_td")!;
+    expect(td.odds.over).toBe(140); // Kalshi left out
+    expect(td.side).toBe("over");
+    expect((await readJSON<number>(`sgo/usage/2026-09`))!.value).toBe(1);
+    expect(JSON.stringify(s)).not.toContain("sgo-key");
+  });
+
+  it("falls back to The Odds API when SportsGameOdds fails", async () => {
+    process.env.SPORTSGAMEODDS_API_KEY = "sgo-key";
+    process.env.ODDS_API_KEY = "test-key";
+    sgo.fail = true;
+    const s = await buildAnalysis(20_000);
+    expect(s.sources.find((x) => x.key === "props")!.provider).toBe("The Odds API (backup)");
+    expect(s.props.some((p) => p.player.name === "Jalen Hurts" && p.market === "pass_yds")).toBe(true);
+    expect(s.warnings.join(" ")).toMatch(/SportsGameOdds unavailable/);
+  });
+
+  it("stops calling SportsGameOdds at the monthly limit", async () => {
+    process.env.SPORTSGAMEODDS_API_KEY = "sgo-key";
+    process.env.ODDS_API_KEY = "test-key";
+    process.env.SGO_MONTHLY_LIMIT = "5";
+    await writeJSON("sgo/usage/2026-09", 5);
+    const s = await buildAnalysis(20_000);
+    expect(sgo.calls).toBe(0);
+    expect(s.sources.find((x) => x.key === "props")!.provider).toBe("The Odds API (backup)");
+    expect(s.warnings.join(" ")).toMatch(/monthly limit/);
   });
 });

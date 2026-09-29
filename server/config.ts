@@ -12,6 +12,12 @@ export const DEFAULT_MARKETS =
 
 export function getConfig() {
   return {
+    sgoApiKey: env("SPORTSGAMEODDS_API_KEY"),
+    /** Minutes between SportsGameOdds slate refreshes (each refresh bills one object per game). */
+    sgoCacheMinutes: num("SGO_CACHE_MINUTES", 180),
+    /** Stop calling SportsGameOdds for the month after this many objects (free plan: 2,500). */
+    sgoMonthlyLimit: num("SGO_MONTHLY_LIMIT", 2300),
+    sgoLookaheadHours: num("SGO_LOOKAHEAD_HOURS", Math.min(num("ODDS_LOOKAHEAD_HOURS", 96), 48)),
     oddsApiKey: env("ODDS_API_KEY"),
     oddsRegions: env("ODDS_API_REGIONS") || "us",
     oddsBookmakers: list("ODDS_API_BOOKMAKERS", ""),

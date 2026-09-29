@@ -1,5 +1,6 @@
-import type { BookLine, Game, PropLineGroup, PropMarket, SeasonDataset, SourceMeta, RosterPlayer } from "../../shared/types";
+import type { BookLine, Game, TeamRef, PropLineGroup, PropMarket, SeasonDataset, SourceMeta, RosterPlayer } from "../../shared/types";
 import { fetchEventProps, fetchOddsEvents, type OddsEvent, type Quota, type RawPropQuote } from "../providers/oddsApi";
+import { fetchSgoSlate, type SgoGame } from "../providers/sportsGameOdds";
 import { cached, readJSON, writeJSON, MIN } from "../cache";
 import { mapLimit } from "../http";
 import type { AppConfig } from "../config";
@@ -89,22 +90,108 @@ export async function getPropLines(
   const now = Date.now();
   const upcoming = games.filter((g) => g.state === "pre" && Date.parse(g.date) - now < cfg.oddsLookaheadHours * 3600_000);
 
-  if (!cfg.oddsApiKey) {
+  if (!cfg.sgoApiKey && !cfg.oddsApiKey) {
     if (cfg.demoPropLines && demoInputs) {
       const groups = buildDemoLines(upcoming, demoInputs.datasets, demoInputs.roster);
       return {
         groups, quota: null,
         warnings: ["DEMO LINES: no sportsbook data. Lines are the player's recent median, not real odds, and are never tracked."],
-        meta: { key: "props", label: "Player prop lines", provider: "Demo (player medians)", status: "mock", fetchedAt: new Date().toISOString(), note: "ODDS_API_KEY not set — DEMO_PROP_LINES=true" },
+        meta: { key: "props", label: "Player prop lines", provider: "Demo (player medians)", status: "mock", fetchedAt: new Date().toISOString(), note: "No odds API key set — DEMO_PROP_LINES=true" },
       };
     }
     return {
       groups: [], quota: null,
-      warnings: ["Player prop lines unavailable: ODDS_API_KEY is not configured on the server."],
-      meta: { key: "props", label: "Player prop lines", provider: "The Odds API", status: "unavailable", fetchedAt: null, note: "Add ODDS_API_KEY in Netlify environment variables" },
+      warnings: ["Player prop lines unavailable: no odds API key is configured on the server (SPORTSGAMEODDS_API_KEY or ODDS_API_KEY)."],
+      meta: { key: "props", label: "Player prop lines", provider: "SportsGameOdds", status: "unavailable", fetchedAt: null, note: "Add SPORTSGAMEODDS_API_KEY in Netlify environment variables" },
     };
   }
 
+  // SportsGameOdds is the main source; The Odds API is the backup.
+  if (cfg.sgoApiKey) {
+    const r = await getSgoLines(games, cfg, warnings, !!cfg.oddsApiKey);
+    if (r) return r;
+  }
+  if (cfg.oddsApiKey) return getOddsApiLines(upcoming, cfg, deadline, warnings, !!cfg.sgoApiKey);
+  return {
+    groups: [], quota: null, warnings,
+    meta: { key: "props", label: "Player prop lines", provider: "SportsGameOdds", status: "unavailable", fetchedAt: null, note: "SportsGameOdds request failed and no backup key is set" },
+  };
+}
+
+const normTeam = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+const sameTeam = (names: string[], t: TeamRef) => {
+  const ours = new Set([t.displayName, t.name, t.abbr].filter(Boolean).map(normTeam));
+  return names.some((n) => ours.has(normTeam(n)));
+};
+
+/** Find the SportsGameOdds event for an ESPN game (team names, then kickoff within 18 hours). */
+export function matchSgoGame(g: Game, slate: SgoGame[]): SgoGame | undefined {
+  return slate.find((e) => sameTeam(e.home, g.home) && sameTeam(e.away, g.away) &&
+    (!e.startsAt || Math.abs(Date.parse(e.startsAt) - Date.parse(g.date)) < 18 * 3600_000));
+}
+
+export const sgoUsageKey = (d = new Date()) => `sgo/usage/${d.toISOString().slice(0, 7)}`;
+
+/**
+ * SportsGameOdds lines. One request covers every game in the window, and
+ * each game returned is billed as one object, so the whole slate is cached
+ * and refreshed every SGO_CACHE_MINUTES. Returns null to fall back to the backup.
+ */
+async function getSgoLines(games: Game[], cfg: AppConfig, warnings: string[], hasBackup: boolean): Promise<PropLinesResult | null> {
+  const now = Date.now();
+  const upcoming = games.filter((g) => g.state === "pre" && Date.parse(g.date) - now < cfg.sgoLookaheadHours * 3600_000);
+  let used = (await readJSON<number>(sgoUsageKey()))?.value ?? 0;
+  const usageNote = () => `; ${used.toLocaleString("en-US")} SportsGameOdds objects used this month (app count, limit ${cfg.sgoMonthlyLimit.toLocaleString("en-US")})`;
+  const meta = (groups: PropLineGroup[], status: SourceMeta["status"], fetchedAt: string | null, note: string): PropLinesResult => ({
+    groups, quota: null, warnings,
+    meta: { key: "props", label: "Player prop lines", provider: "SportsGameOdds", status, fetchedAt, note: note + usageNote() },
+  });
+  if (!upcoming.length) return meta([], "unavailable", null, `No games starting in the next ${cfg.sgoLookaheadHours} hours`);
+
+  let slate;
+  try {
+    slate = await cached("sgo/slate", cfg.sgoCacheMinutes * MIN, async () => {
+      if (used >= cfg.sgoMonthlyLimit) throw new Error(`monthly limit of ${cfg.sgoMonthlyLimit} objects reached`);
+      const r = await fetchSgoSlate(cfg.sgoApiKey, new Date(now + cfg.sgoLookaheadHours * 3600_000));
+      used += r.objects;
+      await writeJSON(sgoUsageKey(), used);
+      return r.games;
+    });
+  } catch (e) {
+    warnings.push(`SportsGameOdds unavailable: ${(e as Error).message}${hasBackup ? ". Using The Odds API as backup." : ""}`);
+    return hasBackup ? null : meta([], "unavailable", null, "Request failed");
+  }
+  if (slate.stale) {
+    warnings.push(`SportsGameOdds refresh failed; ${hasBackup ? "using The Odds API as backup" : "showing the last saved lines"}.`);
+    if (hasBackup) return null;
+  }
+
+  const groups: PropLineGroup[] = [];
+  let matched = 0;
+  for (const g of upcoming) {
+    const ev = matchSgoGame(g, slate.data);
+    if (!ev) continue;
+    matched++;
+    // Same cache key the backup uses, so props can be rebuilt after kickoff.
+    if (!slate.fromCache && ev.quotes.length) await writeJSON(`odds/props/${g.id}`, ev.quotes);
+    const gs = groupQuotes(g.id, ev.quotes, slate.fetchedAt);
+    await applyFirstSeen(g.id, gs);
+    groups.push(...gs);
+  }
+  if (slate.data.length && matched < Math.min(slate.data.length, upcoming.length)) {
+    warnings.push(`SportsGameOdds returned ${slate.data.length} games but only ${matched} matched the schedule.`);
+  }
+  return meta(
+    groups,
+    groups.length ? (slate.fromCache ? "cached" : "live") : "unavailable",
+    slate.fetchedAt,
+    `${groups.length} player lines across ${new Set(groups.map((x) => x.gameId)).size} games` +
+      (groups.length ? "" : " (books usually post NFL props 1–2 days before kickoff)"),
+  );
+}
+
+/** The Odds API lines, fetched one game at a time (billed per market). */
+async function getOddsApiLines(upcoming: Game[], cfg: AppConfig, deadline: number, warnings: string[], isBackup: boolean): Promise<PropLinesResult> {
   let quota: Quota | null = null;
   let events: OddsEvent[] = [];
   try {
@@ -147,7 +234,7 @@ export async function getPropLines(
     quota,
     warnings,
     meta: {
-      key: "props", label: "Player prop lines", provider: "The Odds API",
+      key: "props", label: "Player prop lines", provider: isBackup ? "The Odds API (backup)" : "The Odds API",
       status: groups.length ? (anyLive ? "live" : "cached") : "unavailable",
       fetchedAt: oldest,
       note: `${groups.length} player lines across ${new Set(groups.map((x) => x.gameId)).size} games` +

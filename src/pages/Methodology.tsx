@@ -15,7 +15,8 @@ export default function Methodology() {
         <Card className="p-4">
           <ul className="space-y-2 text-sm text-ink-2">
             <li><b className="text-ink">ESPN public API</b> — schedule, records, venues (indoor/outdoor), game spread/total/moneyline with openers, injury reports, rosters, and full box scores. Box scores give per-game carries, targets, receptions, longest catch, pass attempts/completions/yards/TDs and team red-zone trips. Player logs, usage shares and defensive numbers are all computed from these box scores.</li>
-            <li><b className="text-ink">The Odds API</b> — player prop lines and prices from multiple sportsbooks (requires a key). The consensus line is the most common line across books; prices are the median at that line.</li>
+            <li><b className="text-ink">SportsGameOdds</b> — player prop lines and prices from multiple sportsbooks (requires a key). Pick'em apps and prediction markets (PrizePicks, Underdog, Kalshi) are left out because they don't price props like sportsbooks. The consensus line is the most common line across books; prices are the median at that line.</li>
+            <li><b className="text-ink">The Odds API</b> — backup source for the same lines, used only if SportsGameOdds fails or reaches its monthly limit.</li>
             <li><b className="text-ink">Open-Meteo</b> — hourly forecast at kickoff for outdoor stadiums (temperature, wind, gusts, precipitation chance).</li>
             <li><b className="text-ink">Not available:</b> snap counts, route participation, player red-zone touches, coverage/scheme data and pressure rate. These are shown as "Data unavailable" rather than estimated. Sacks generated are used as a pressure proxy for context only.</li>
           </ul>

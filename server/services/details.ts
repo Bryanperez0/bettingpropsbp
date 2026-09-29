@@ -20,7 +20,7 @@ export function statusOf(s: AnalysisSnapshot): StatusInfo {
   const cfg = getConfig();
   return {
     generatedAt: s.generatedAt, season: s.season, seasonType: s.seasonType, week: s.week,
-    oddsConfigured: !!cfg.oddsApiKey, demoLines: !cfg.oddsApiKey && cfg.demoPropLines,
+    oddsConfigured: !!(cfg.sgoApiKey || cfg.oddsApiKey), demoLines: !cfg.sgoApiKey && !cfg.oddsApiKey && cfg.demoPropLines,
     storage: storageBackend(), stats: s.stats,
   };
 }

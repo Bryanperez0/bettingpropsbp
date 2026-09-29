@@ -90,7 +90,7 @@ export function Layout() {
         </main>
         <footer className="mx-auto max-w-7xl border-t border-line px-4 py-6 lg:px-8">
           <Disclaimer />
-          <p className="mt-2 text-xs text-ink-3">Data: ESPN (schedule, stats, injuries, game lines), The Odds API (player props), Open-Meteo (weather). Team logos and headshots are served by ESPN.</p>
+          <p className="mt-2 text-xs text-ink-3">Data: ESPN (schedule, stats, injuries, game lines), SportsGameOdds (player props, with The Odds API as backup), Open-Meteo (weather). Team logos and headshots are served by ESPN.</p>
         </footer>
       </div>
     </div>
