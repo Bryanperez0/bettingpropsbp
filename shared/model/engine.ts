@@ -104,7 +104,10 @@ export function analyzeProp(input: AnalyzeInput): AnalyzedProp | null {
   // Pick the side with the larger edge vs the market. Without prices, the
   // more likely side wins (identical to projection vs line for O/U props).
   let side: PropSide;
-  if (impliedOver !== null && impliedUnder !== null) side = pOver - impliedOver >= pUnder - impliedUnder ? "over" : "under";
+  // Anytime TD is a Yes-only bet at sportsbooks, so it is always graded as
+  // "Yes"; when the price isn't worth it the edge is negative, not a "No" pick.
+  if (input.line.market === "anytime_td") side = "over";
+  else if (impliedOver !== null && impliedUnder !== null) side = pOver - impliedOver >= pUnder - impliedUnder ? "over" : "under";
   else side = pOver >= pUnder ? "over" : "under";
   const modelProb = side === "over" ? pOver : pUnder;
   const impliedProb = side === "over" ? impliedOver : impliedUnder;
@@ -185,7 +188,6 @@ export function analyzeProp(input: AnalyzeInput): AnalyzedProp | null {
   if (input.player.injuryStatus && !/active/i.test(input.player.injuryStatus)) risks.push(`${input.player.name} is listed ${input.player.injuryStatus}`);
   if (sidePrice === null) risks.push("No price for this side — market probability assumed at -110");
   if (input.line.source === "demo") risks.push("DEMO line (player's recent median), not a sportsbook line");
-  if (input.line.market === "anytime_td" && side === "under" && input.line.underPrice === null) risks.push("Most books do not offer a 'No' side for anytime TD");
   if (hitRates.season.pct !== null && hitRates.season.pct < 0.4 && hitRates.season.total >= 3) risks.push(`Only ${hitRates.season.hits}/${hitRates.season.total} this season at this line`);
 
   const explanation = buildExplanation({

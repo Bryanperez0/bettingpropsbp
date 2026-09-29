@@ -220,3 +220,15 @@ describe("confidence scoring", () => {
     expect(tierFor(80, -0.01)).toBe("negative");
   });
 });
+
+describe("anytime TD is Yes-only", () => {
+  it("never recommends 'No'; a poor price shows as a negative-edge Yes", () => {
+    // Low-usage player at a short price: the model thinks Yes is overpriced.
+    const logs = makeLogs(Array.from({ length: 6 }, () => ({ rushAtt: 2, rushYds: 8, targets: 1 })));
+    const a = analyzeProp(input({ logs, line: lineGroup({ market: "anytime_td", line: null, overPrice: -200, underPrice: 160 }) }))!;
+    expect(a.side).toBe("over");
+    expect(a.sideLabel).toMatch(/^YES/);
+    expect(a.probEdge).toBeLessThan(0);
+    expect(a.tier).toBe("negative");
+  });
+});

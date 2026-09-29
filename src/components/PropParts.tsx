@@ -152,7 +152,7 @@ export function BooksTable({ books, unit }: { books: AnalyzedProp["books"]; unit
             <th className="py-1.5 pr-3 font-medium">Book</th>
             {unit !== "prob" && <th className="py-1.5 pr-3 font-medium">Line</th>}
             <th className="py-1.5 pr-3 font-medium">{unit === "prob" ? "Yes" : "Over"}</th>
-            <th className="py-1.5 pr-3 font-medium">{unit === "prob" ? "No" : "Under"}</th>
+            {unit !== "prob" && <th className="py-1.5 pr-3 font-medium">Under</th>}
             <th className="py-1.5 font-medium">Updated</th>
           </tr>
         </thead>
@@ -162,7 +162,7 @@ export function BooksTable({ books, unit }: { books: AnalyzedProp["books"]; unit
               <td className="py-1.5 pr-3 font-sans text-ink">{b.bookTitle}</td>
               {unit !== "prob" && <td className="py-1.5 pr-3">{b.line ?? "—"}</td>}
               <td className="py-1.5 pr-3">{fmtOdds(b.overPrice)}</td>
-              <td className="py-1.5 pr-3">{fmtOdds(b.underPrice)}</td>
+              {unit !== "prob" && <td className="py-1.5 pr-3">{fmtOdds(b.underPrice)}</td>}
               <td className="py-1.5 text-ink-3">{b.lastUpdate ? timeAgo(b.lastUpdate) : "—"}</td>
             </tr>
           ))}
