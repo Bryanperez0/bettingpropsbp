@@ -5,6 +5,7 @@ import { Freshness, Warnings } from "../components/Freshness";
 import { StatusBanner } from "../components/StatusBanner";
 import { Empty, ErrorState, PageHeader, Spinner } from "../components/ui";
 import type { PropCategory } from "../../shared/types";
+import { propHasStarted } from "../components/LiveTracker";
 
 const TABS: { key: PropCategory | "all"; label: string }[] = [
   { key: "all", label: "All" },
@@ -23,12 +24,14 @@ export default function TopProps() {
   const all = useProps(undefined, view === "all");
   const q = view === "top" ? top : all;
   const [tab, setTab] = useState<PropCategory | "all">("all");
-  const list = useMemo(() => {
+  const { list, started } = useMemo(() => {
     const byTab = (q.data?.data.props ?? []).filter((p) => tab === "all" || p.category === tab);
-    if (view === "top") return byTab.slice(0, 20);
-    // All props: upcoming games only, strongest first.
-    const now = Date.now();
-    return byTab.filter((p) => Date.parse(p.kickoff) > now).sort((a, b) => b.confidence.total - a.confidence.total || b.probEdge - a.probEdge);
+    const strongest = (a: typeof byTab[number], b: typeof byTab[number]) => b.confidence.total - a.confidence.total || b.probEdge - a.probEdge;
+    const upcoming = byTab.filter((p) => !propHasStarted(p)).sort(strongest);
+    const begun = byTab.filter((p) => propHasStarted(p)).sort(strongest);
+    return view === "top"
+      ? { list: upcoming.slice(0, 20), started: begun.slice(0, 20) }
+      : { list: upcoming, started: begun };
   }, [q.data, tab, view]);
 
   if (q.isLoading) return <Spinner label={view === "top" ? "Ranking props" : "Loading every prop"} />;
@@ -60,12 +63,23 @@ export default function TopProps() {
           </button>
         ))}
       </div>
-      {view === "all" && <p className="mb-3 text-xs text-ink-3">{list.length} props</p>}
+      {view === "all" && <p className="mb-3 text-xs text-ink-3">{list.length} upcoming{started.length ? ` · ${started.length} in progress or final` : ""}</p>}
       {list.length ? (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {list.map((p, i) => <PropCard key={p.id} p={p} rank={view === "top" ? i + 1 : undefined} />)}
         </div>
-      ) : <Empty>No props in this category right now.</Empty>}
+      ) : (
+        <Empty>{started.length ? "No upcoming games with props in this category. Picks from games in progress or finished are below." : "No props in this category right now."}</Empty>
+      )}
+      {started.length > 0 && (
+        <section className="mt-10">
+          <h2 className="text-lg font-semibold tracking-tight">In progress & final</h2>
+          <p className="mb-3 mt-0.5 text-sm text-ink-3">Pregame picks from games that have started, with live stats. Confidence and lean are frozen at kickoff.</p>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {started.map((p) => <PropCard key={p.id} p={p} />)}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

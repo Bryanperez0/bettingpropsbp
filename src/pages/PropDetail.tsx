@@ -7,6 +7,7 @@ import { InjuryTable, LinesTable, WeatherBadge } from "../components/GameParts";
 import { Freshness, Warnings } from "../components/Freshness";
 import { ScoreHistory } from "../components/ScoreHistory";
 import { PropExplorer } from "../components/PropExplorer";
+import { LiveTracker, propHasStarted } from "../components/LiveTracker";
 import { Card, ErrorState, Pill, Section, Spinner, Stat, Unavailable } from "../components/ui";
 import { fmtFixed, fmtKickoff, fmtOdds, fmtPct, fmtSigned, projectionText } from "../utils/format";
 
@@ -43,6 +44,12 @@ export default function PropDetail() {
               <span aria-hidden>·</span> {fmtKickoff(p.kickoff)}
               {game && <><span aria-hidden>·</span><Link to={`/games/${game.id}`} className="hover:text-ink hover:underline">Game analysis</Link></>}
             </div>
+            {propHasStarted(p) && (
+              <div className="mt-3 max-w-xl space-y-1">
+                <LiveTracker p={p} />
+                <p className="text-xs text-ink-3">Game has started. The confidence and lean below are the pregame analysis, frozen at kickoff so the result can be judged fairly.</p>
+              </div>
+            )}
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <span className="text-lg font-semibold">{p.marketLabel}</span>
               <SideBadge side={p.side} label={`LEAN: ${p.sideLabel}`} large />

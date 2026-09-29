@@ -183,4 +183,44 @@ describe("analysis pipeline", () => {
     expect(saved.generatedAt).toBe(good.generatedAt);
     if (kept) expect(kept.props.length).toBe(good.props.length);
   });
+
+  it("keeps the frozen pregame props after kickoff and serves live stats", async () => {
+    process.env.ODDS_API_KEY = "test-key";
+    for (let i = 0; i < 3; i++) await buildAnalysis(20_000);
+    const before = (await readJSON<AnalysisSnapshot>("analysis/current"))!.value;
+    const picksBefore = (await readLedger()).length;
+    const swiftBefore = before.props.find((p) => p.player.name === "D'Andre Swift" && p.market === "rush_yds")!;
+
+    // Kickoff: ESPN now reports PHI @ CHI in progress.
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL) => {
+      const res = await realFetch(input);
+      if (!/\/scoreboard/.test(String(input)) || /week=/.test(String(input))) return res;
+      const body = await res.json();
+      for (const e of body.events ?? []) if (e.id === "401872963") { e.status.type.state = "in"; e.status.type.shortDetail = "Q2 5:10"; }
+      return new Response(JSON.stringify(body), { status: 200 });
+    }));
+    await writeJSON("espn/scoreboard/current", null as never); // force a fresh schedule read
+    await writeJSON("analysis/last-attempt", null as never);
+    const after = await buildAnalysis(20_000);
+    vi.stubGlobal("fetch", realFetch);
+
+    const swift = after.props.find((p) => p.id === swiftBefore.id)!;
+    expect(swift).toBeDefined();
+    expect(swift.frozen?.state).toBe("in");
+    expect(swift.confidence.total).toBe(swiftBefore.confidence.total); // frozen, not re-scored
+    const top = topProps(after.props, 20, Date.parse("2026-09-28T19:00:00Z"));
+    expect(top.length).toBeGreaterThan(0);
+    expect(top.every((p) => p.frozen)).toBe(true);
+    expect(await readLedger()).toHaveLength(picksBefore); // frozen props never add picks
+  });
+
+  it("reads live box scores for started games", async () => {
+    const { getLiveGames } = await import("../server/services/live");
+    const s = (await buildAnalysis(20_000));
+    const finished = s.games.find((g) => g.id === "401872948")!; // ATL @ GB, final
+    const live = await getLiveGames([finished]);
+    expect(live["401872948"].state).toBe("post");
+    expect(live["401872948"].players["4430807"].rushYds).toBe(194); // Bijan Robinson's real line
+  });
 });

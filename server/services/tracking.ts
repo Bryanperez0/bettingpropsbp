@@ -28,7 +28,7 @@ export function selectNewPicks(ledger: TrackedPick[], props: AnalyzedProp[], now
     if (p.lineSource !== "sportsbook") continue;
     if (p.confidence.total < TRACK_MIN_CONFIDENCE || p.probEdge <= 0) continue;
     if (!isActionable(p)) continue; // no price for this side at any book
-    if (Date.parse(p.kickoff) <= Date.parse(now)) continue;
+    if (p.frozen || Date.parse(p.kickoff) <= Date.parse(now)) continue;
     const id = pickKey({ gameId: p.gameId, market: p.market, playerId: p.player.id, playerName: p.player.name, side: p.side });
     if (have.has(id)) continue;
     have.add(id);

@@ -4,6 +4,7 @@ import { fmtFixed, fmtKickoff, fmtOdds, fmtPct, fmtSigned, projectionText } from
 import { PlayerAvatar, TeamLogo } from "./Media";
 import { ConfidenceMeter, HitRateGrid, SideBadge, TierBadge } from "./PropParts";
 import { Pill } from "./ui";
+import { LiveTracker, propHasStarted } from "./LiveTracker";
 
 export function PropCard({ p, rank }: { p: SlimProp; rank?: number }) {
   const isProb = p.unit === "prob";
@@ -20,6 +21,7 @@ export function PropCard({ p, rank }: { p: SlimProp; rank?: number }) {
             <span className="text-xs text-ink-3">{p.player.position}</span>
             {p.player.injuryStatus && <Pill className="bg-moderate/10 text-moderate">{p.player.injuryStatus}</Pill>}
             {p.lineSource === "demo" && <Pill className="bg-fuchsia-500/15 text-fuchsia-300">DEMO LINE</Pill>}
+            {propHasStarted(p) && <Pill className="bg-surface-3 text-ink-2" >Pregame pick</Pill>}
           </div>
           <div className="mt-1 flex items-center gap-1.5 text-xs text-ink-2">
             <TeamLogo abbr={p.player.team} size={16} />
@@ -32,6 +34,8 @@ export function PropCard({ p, rank }: { p: SlimProp; rank?: number }) {
         </div>
         <ConfidenceMeter value={p.confidence.total} tier={p.tier} />
       </div>
+
+      {propHasStarted(p) && <div className="mt-3"><LiveTracker p={p} compact /></div>}
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <span className="text-sm font-medium text-ink-2">{p.marketLabel}</span>

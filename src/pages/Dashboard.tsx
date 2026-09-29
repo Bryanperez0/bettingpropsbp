@@ -5,6 +5,7 @@ import { GameCard } from "../components/GameParts";
 import { InjuryTable } from "../components/GameParts";
 import { Freshness, Warnings } from "../components/Freshness";
 import { StatusBanner } from "../components/StatusBanner";
+import { propHasStarted } from "../components/LiveTracker";
 import { Card, Empty, ErrorState, PageHeader, Section, Spinner } from "../components/ui";
 
 export default function Dashboard() {
@@ -13,6 +14,8 @@ export default function Dashboard() {
   if (q.isError || !q.data) return <ErrorState error={q.error} retry={() => q.refetch()} />;
   const { data, sources, warnings } = q.data;
   const upcoming = data.games.filter((g) => g.state !== "post");
+  const upcomingTop = data.top.filter((p) => !propHasStarted(p));
+  const startedTop = data.top.filter((p) => propHasStarted(p));
   const seasonLabel = data.status.seasonType === 3 ? "Postseason" : data.status.seasonType === 1 ? "Preseason" : `Week ${data.status.week}`;
 
   return (
@@ -29,10 +32,12 @@ export default function Dashboard() {
       <div className="mb-6"><Freshness sources={sources} compact /></div>
 
       <Section title="Top props" subtitle={`${data.status.stats.analyzed} props analyzed · ranked by confidence, then probability edge · max 2 per player`}>
-        {data.top.length ? (
+        {upcomingTop.length ? (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {data.top.map((p, i) => <PropCard key={p.id} p={p} rank={i + 1} />)}
+            {upcomingTop.map((p, i) => <PropCard key={p.id} p={p} rank={i + 1} />)}
           </div>
+        ) : startedTop.length ? (
+          <Empty>No upcoming games with prop lines right now. Picks from games in progress or finished are below.</Empty>
         ) : (
           <Empty>
             {data.status.oddsConfigured
@@ -41,6 +46,14 @@ export default function Dashboard() {
           </Empty>
         )}
       </Section>
+
+      {startedTop.length > 0 && (
+        <Section title="In progress & final" subtitle="Top pregame picks from games that have started, with live stats. Confidence and lean are frozen at kickoff.">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {startedTop.map((p) => <PropCard key={p.id} p={p} />)}
+          </div>
+        </Section>
+      )}
 
       <Section title="This week's games" subtitle={`${upcoming.length} upcoming or live`} action={<Link to="/games" className="text-sm text-ink-2 hover:text-ink">All games →</Link>}>
         {data.games.length ? (

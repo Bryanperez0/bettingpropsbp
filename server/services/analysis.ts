@@ -42,6 +42,7 @@ export const isComplete = (q: SnapshotQuality | undefined) => !!q && q.datasetPe
 
 const SNAPSHOT_KEY = "analysis/current";
 const ATTEMPT_KEY = "analysis/last-attempt";
+const frozenKey = (gameId: string) => `frozen/${gameId}`;
 export const ANALYSIS_TTL = 15 * MIN;
 
 /** Everything the model needs, loaded once per build. */
@@ -232,8 +233,6 @@ export async function buildAnalysis(budgetMs = 20_000): Promise<AnalysisSnapshot
     warnings.push(`Skipped ${unmatchedNames.length} sportsbook player name${unmatchedNames.length === 1 ? "" : "s"} not found on either team's ESPN roster (usually practice-squad or inactive players): ${unmatchedNames.join(", ")}.`);
   }
 
-  props.sort((a, b) => b.confidence.total - a.confidence.total || b.probEdge - a.probEdge);
-
   // Only games still to be played need rosters for this week's props.
   const slateTeams = new Set(games.filter((g) => g.state !== "post").flatMap((g) => [g.home.abbr, g.away.abbr]));
   const rosterTeams = new Set(rosters.players.map((p) => p.team));
@@ -242,6 +241,31 @@ export async function buildAnalysis(budgetMs = 20_000): Promise<AnalysisSnapshot
     rosterTeamsMissing: [...slateTeams].filter((t) => !rosterTeams.has(t)).length,
     injuriesOk,
   };
+
+  // Freeze each upcoming game's pregame analysis (complete builds only), and
+  // bring it back once the game has started so props don't vanish at kickoff.
+  for (const g of games) {
+    const gp = props.filter((p) => p.gameId === g.id);
+    if (g.state === "pre" && gp.length && isComplete(quality)) await writeJSON(frozenKey(g.id), gp);
+  }
+  for (const g of games.filter((x) => x.state !== "pre")) {
+    const f = await readJSON<AnalyzedProp[]>(frozenKey(g.id));
+    if (f && !props.some((p) => p.gameId === g.id)) {
+      props.push(...f.value.map((p) => ({ ...p, frozen: { state: g.state, frozenAt: f.savedAt } })));
+    }
+  }
+
+  props.sort((a, b) => b.confidence.total - a.confidence.total || b.probEdge - a.probEdge);
+
+  // After kickoff no new lines are fetched; say that plainly instead of "unavailable".
+  const frozenProps = props.filter((p) => p.frozen);
+  const propsMeta = sources.find((x) => x.key === "props");
+  if (propsMeta && propsMeta.status === "unavailable" && frozenProps.length && !props.some((p) => !p.frozen)) {
+    propsMeta.status = "cached";
+    propsMeta.fetchedAt = frozenProps.map((p) => p.frozen!.frozenAt).sort()[0];
+    propsMeta.note = `Games have started: showing ${frozenProps.length} pregame lines frozen at kickoff`;
+  }
+
   const snapshot: AnalysisSnapshot = {
     generatedAt: now, season: slate.season, seasonType: slate.seasonType, week: slate.week,
     games, props, injuries: inputs.injuries, sources, warnings, stats, quality,
@@ -266,7 +290,7 @@ export async function buildAnalysis(budgetMs = 20_000): Promise<AnalysisSnapshot
   // Only complete builds feed score history and the performance ledger.
   if (isComplete(quality)) {
     try {
-      await recordHistory(props, now);
+      await recordHistory(props.filter((p) => !p.frozen), now);
       await recordPicks(props, now);
     } catch (e) {
       console.warn("history/tracking failed", e);
@@ -309,11 +333,13 @@ export async function getAnalysis(opts: { force?: boolean; budgetMs?: number } =
 }
 
 /** Top-ranked props: upcoming games, not negative, max 2 per player. */
-export function topProps(props: AnalyzedProp[], n = 20, nowMs = Date.now()): AnalyzedProp[] {
+export const hasStarted = (p: Pick<AnalyzedProp, "kickoff" | "frozen">, nowMs = Date.now()) =>
+  !!p.frozen || Date.parse(p.kickoff) <= nowMs;
+
+function rankTop(props: AnalyzedProp[], n: number): AnalyzedProp[] {
   const perPlayer = new Map<string, number>();
   const out: AnalyzedProp[] = [];
   for (const p of props) {
-    if (Date.parse(p.kickoff) <= nowMs) continue;
     if (p.tier === "negative" || p.probEdge <= 0) continue;
     if (!isActionable(p)) continue; // e.g. anytime-TD "No" that no book offers
     const k = p.player.id ?? p.player.name;
@@ -324,4 +350,15 @@ export function topProps(props: AnalyzedProp[], n = 20, nowMs = Date.now()): Ana
     if (out.length >= n) break;
   }
   return out;
+}
+
+/**
+ * Top-ranked props: up to n on games that haven't started, followed by up to
+ * n from games in progress or final (their frozen pregame analysis).
+ * Positive edge only, max 2 per player.
+ */
+export function topProps(props: AnalyzedProp[], n = 20, nowMs = Date.now()): AnalyzedProp[] {
+  const upcoming = rankTop(props.filter((p) => !hasStarted(p, nowMs)), n);
+  const started = rankTop(props.filter((p) => hasStarted(p, nowMs)), n);
+  return [...upcoming, ...started];
 }

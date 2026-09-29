@@ -361,6 +361,11 @@ export interface AnalyzedProp {
   explanation: string;
   dataQuality: { score: number; missing: string[] };
   generatedAt: string;
+  /**
+   * Set once the game has started: the prop is the frozen PREGAME analysis
+   * (confidence and lean as of the last refresh before kickoff).
+   */
+  frozen?: { state: GameState; frozenAt: string } | null;
 }
 
 /** One recalculation of a prop, kept so score changes can be explained. */
@@ -377,6 +382,18 @@ export interface ScoreHistoryEntry {
   penalties: Record<string, number>;
   /** What moved since the previous entry. */
   changes: string[];
+}
+
+/** Live box-score snapshot for a game that has started. */
+export interface LiveGame {
+  gameId: string;
+  state: GameState;
+  detail: string;
+  homeScore: number | null;
+  awayScore: number | null;
+  /** Player id -> stat line so far. Players without a stat yet are absent. */
+  players: Record<string, StatLine>;
+  fetchedAt: string;
 }
 
 // ---------------------------------------------------------------------------

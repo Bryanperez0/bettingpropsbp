@@ -16,7 +16,7 @@ const edgeScore = (p: SlimProp) => (p.unit === "prob" ? p.probEdge : p.edgePct ?
 
 export default function PropFinder() {
   const q = useProps();
-  const [f, setF] = useState({ player: "", team: "All", opp: "All", pos: "All", market: "All", side: "All", game: "All", book: "All", minConf: 0, minEdge: 0, upcomingOnly: true });
+  const [f, setF] = useState({ player: "", team: "All", opp: "All", pos: "All", market: "All", side: "All", game: "All", book: "All", minConf: 0, minEdge: 0, upcomingOnly: false });
   const [sort, setSort] = useState<Sort>("confidence");
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((x) => ({ ...x, [k]: v }));
 

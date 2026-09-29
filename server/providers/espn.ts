@@ -199,6 +199,9 @@ export interface SummaryResult {
   box: GameBox | null;
   injuries: InjuryItem[];
   completed: boolean;
+  /** Live status from the game header (works before, during and after the game). */
+  state: GameState;
+  detail: string;
 }
 
 export async function fetchSummary(gameId: string): Promise<SummaryResult> {
@@ -210,7 +213,9 @@ export function parseSummary(gameId: string, s: Any): SummaryResult {
   const comp = s?.header?.competitions?.[0];
   const completed = !!comp?.status?.type?.completed;
   const injuries = parseSummaryInjuries(s);
-  if (!comp || !s?.boxscore?.players?.length) return { box: null, injuries, completed };
+  const state = (comp?.status?.type?.state ?? "pre") as GameState;
+  const detail: string = comp?.status?.type?.shortDetail ?? comp?.status?.type?.detail ?? "";
+  if (!comp || !s?.boxscore?.players?.length) return { box: null, injuries, completed, state, detail };
 
   const byTeamId: Record<string, { abbr: string; score: number; home: boolean }> = {};
   for (const c of comp.competitors ?? []) {
@@ -281,7 +286,7 @@ export function parseSummary(gameId: string, s: Any): SummaryResult {
   const teams = Object.entries(byTeamId);
   const h = teams.find(([, v]) => v.home);
   const a = teams.find(([, v]) => !v.home);
-  if (!h || !a) return { box: null, injuries, completed };
+  if (!h || !a) return { box: null, injuries, completed, state, detail };
   for (const [, v] of teams) teamTotals[v.abbr] = teamStat(v.abbr);
 
   const box: GameBox = {
@@ -294,7 +299,7 @@ export function parseSummary(gameId: string, s: Any): SummaryResult {
     away: { teamId: a[0], abbr: a[1].abbr, score: a[1].score, stats: teamTotals[a[1].abbr] },
     players: [...players.values()],
   };
-  return { box, injuries, completed };
+  return { box, injuries, completed, state, detail };
 }
 
 function athleteId(a: Any): string {

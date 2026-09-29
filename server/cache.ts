@@ -139,7 +139,8 @@ export interface CachedResult<T> {
  * loader fails and an older copy exists, return it marked stale.
  */
 export async function cached<T>(key: string, ttlMs: number, loader: () => Promise<T>): Promise<CachedResult<T>> {
-  const hit = await readJSON<T>(key);
+  const found = await readJSON<T>(key);
+  const hit = found && found.value !== null && found.value !== undefined ? found : null; // empty value = miss
   if (hit && Date.now() - Date.parse(hit.savedAt) < ttlMs) {
     return { data: hit.value, fetchedAt: hit.savedAt, fromCache: true, stale: false };
   }
