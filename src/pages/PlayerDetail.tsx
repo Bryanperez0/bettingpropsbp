@@ -4,6 +4,7 @@ import { PlayerAvatar, TeamLogo } from "../components/Media";
 import { InjuryStatus, WeatherBadge } from "../components/GameParts";
 import { PropCard } from "../components/PropCard";
 import { StatChart, type StatPoint } from "../charts/StatChart";
+import { PropExplorer } from "../components/PropExplorer";
 import { Card, Empty, ErrorState, Section, Spinner, Unavailable } from "../components/ui";
 import { fmtFixed, fmtKickoff, fmtPct } from "../utils/format";
 import { positionGroup } from "../../shared/model/markets";
@@ -62,6 +63,16 @@ export default function PlayerDetail() {
           )}
         </div>
       </Card>
+
+      {d.logs.length > 0 && (
+        <Section title="Game-by-game" subtitle="Pick a prop, the games and the line to see how he would have done." className="mt-6">
+          <Card className="p-4">
+            <PropExplorer key={d.player.id} logs={d.logs} season={d.season} position={d.player.position}
+              playerProps={d.props.map((p) => ({ id: p.id, market: p.market, line: p.line, side: p.side, sideLabel: p.sideLabel }))}
+              opponent={d.upcoming?.opponent ?? null} />
+          </Card>
+        </Section>
+      )}
 
       <Section title="Available props this week" className="mt-6">
         {d.props.length ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{d.props.map((p) => <PropCard key={p.id} p={p} />)}</div> : <Empty>No prop lines loaded for this player.</Empty>}

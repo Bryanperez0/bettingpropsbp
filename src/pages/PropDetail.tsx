@@ -6,6 +6,7 @@ import { BooksTable, ConfidenceMeter, ConfidenceTable, HitRateGrid, LineMovement
 import { InjuryTable, LinesTable, WeatherBadge } from "../components/GameParts";
 import { Freshness, Warnings } from "../components/Freshness";
 import { ScoreHistory } from "../components/ScoreHistory";
+import { PropExplorer } from "../components/PropExplorer";
 import { Card, ErrorState, Pill, Section, Spinner, Stat, Unavailable } from "../components/ui";
 import { fmtFixed, fmtKickoff, fmtOdds, fmtPct, fmtSigned, projectionText } from "../utils/format";
 
@@ -14,7 +15,7 @@ export default function PropDetail() {
   const q = useProp(id);
   if (q.isLoading) return <Spinner label="Loading prop analysis" />;
   if (q.isError || !q.data) return <ErrorState error={q.error} retry={() => q.refetch()} />;
-  const { prop: p, game, injuries, history } = q.data.data;
+  const { prop: p, game, injuries, history, logs, playerProps } = q.data.data;
   const isProb = p.unit === "prob";
   const statLabel = p.marketLabel.toLowerCase();
   const teamInj = injuries.filter((i) => i.team === p.player.team);
@@ -80,8 +81,15 @@ export default function PropDetail() {
             </Card>
           </Section>
 
-          <Section title={`Game-by-game ${statLabel}`} subtitle={isProb ? "TDs scored per game; the line marks 'scored at least once'." : "Every game graded against the CURRENT line."} className="mb-0">
-            <Card className="p-4"><TrendChart history={p.history} line={p.line} unitLabel={isProb ? "TDs" : statLabel} /></Card>
+          <Section title="Game-by-game" subtitle="Pick the prop, the games and the line. Every game is graded against the line you choose." className="mb-0">
+            <Card className="p-4">
+              {logs?.length ? (
+                <PropExplorer key={p.id} logs={logs} season={p.season} position={p.player.position} playerProps={playerProps ?? []}
+                  initialMarket={p.market} opponent={p.opponent} currentPropId={p.id} />
+              ) : (
+                <TrendChart history={p.history} line={p.line} unitLabel={isProb ? "TDs" : statLabel} />
+              )}
+            </Card>
           </Section>
 
           <Section title="Hit rate at the current line" className="mb-0">

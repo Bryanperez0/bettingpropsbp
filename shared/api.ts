@@ -4,6 +4,15 @@ import type { TeamProfile } from "./model/league";
 
 export type SlimProp = Omit<AnalyzedProp, "history" | "steps" | "matchup">;
 
+/** A player's props on one game, for the chart's prop picker. */
+export interface PlayerPropRef {
+  id: string;
+  market: AnalyzedProp["market"];
+  line: number;
+  side: AnalyzedProp["side"];
+  sideLabel: string;
+}
+
 export interface StatusInfo {
   generatedAt: string;
   season: number;
