@@ -6,6 +6,8 @@ import { useRefresh, useStatus } from "../hooks/useApi";
 import { timeAgo } from "../utils/format";
 import { Disclaimer } from "./Disclaimer";
 import { PlayerSearch } from "./PlayerSearch";
+import { useAuth } from "../auth/AuthProvider";
+import { supabase } from "../auth/supabase";
 
 const NAV = [
   { to: "/", label: "Dashboard", end: true },
@@ -42,6 +44,21 @@ function RefreshButton() {
   );
 }
 
+function Account() {
+  const { user } = useAuth();
+  return (
+    <div className="flex min-w-0 items-center gap-2 text-xs text-ink-3">
+      <span className="hidden max-w-48 truncate md:inline" title={user?.email}>{user?.email}</span>
+      <button
+        onClick={() => supabase.auth.signOut()}
+        className="rounded-lg border border-line px-2.5 py-1 font-medium text-ink-2 hover:border-ink-3 hover:text-ink"
+      >
+        Sign out
+      </button>
+    </div>
+  );
+}
+
 export function Layout() {
   const { pathname } = useLocation();
   return (
@@ -73,7 +90,10 @@ export function Layout() {
               <span className="font-bold text-ink">Prop Lab</span>
             </Link>
             <PlayerSearch className="hidden w-80 sm:block" />
-            <RefreshButton />
+            <div className="flex items-center gap-3">
+              <RefreshButton />
+              <Account />
+            </div>
           </div>
           <div className="px-3 pb-2 sm:hidden"><PlayerSearch /></div>
           <nav className="scrollbar-thin flex gap-1 overflow-x-auto px-3 pb-2 lg:hidden" aria-label="Main mobile">

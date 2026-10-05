@@ -3,6 +3,8 @@ import { Route, Routes, useLocation } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { Spinner } from "./components/ui";
 import Dashboard from "./pages/Dashboard";
+import SignIn from "./pages/SignIn";
+import { useAuth } from "./auth/AuthProvider";
 
 const TopProps = lazy(() => import("./pages/TopProps"));
 const PropDetail = lazy(() => import("./pages/PropDetail"));
@@ -28,6 +30,9 @@ function ScrollToTop() {
 }
 
 export default function App() {
+  const { user, loading, recovery } = useAuth();
+  if (loading) return <div className="px-4"><Spinner /></div>;
+  if (!user || recovery) return <SignIn />;
   return (
     <>
       <ScrollToTop />

@@ -4,6 +4,8 @@ import { readJSON, storageHealth, writeJSON } from "../../server/cache";
 import { ESPN_HOSTS } from "../../server/providers/espn";
 import { fetchSgoUsage } from "../../server/providers/sportsGameOdds";
 import { HttpError } from "../../server/http";
+import { error } from "../../server/respond";
+import { isSignedIn } from "../../server/auth";
 
 /**
  * Connection check for every data source. Reports HTTP status codes only;
@@ -35,7 +37,8 @@ async function probe(name: string, url: string, detailOk: (res: Response) => str
   }
 }
 
-export default async () => {
+export default async (req: Request) => {
+  if (!(await isSignedIn(req))) return error("Sign in to use Prop Lab.", 401);
   const cfg = getConfig();
   const checks: Check[] = [];
   // Every ESPN feed the app uses, on both hosts. The app needs each feed to

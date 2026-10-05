@@ -1,4 +1,5 @@
 import type { ApiEnvelope } from "../../shared/types";
+import { authHeaders } from "../auth/supabase";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -8,7 +9,7 @@ export class ApiError extends Error {
 
 /** All data comes from our own Netlify Functions; no provider keys in the browser. */
 export async function api<T>(path: string, init?: RequestInit): Promise<ApiEnvelope<T>> {
-  const res = await fetch(`/api/${path}`, { ...init, headers: { accept: "application/json", ...(init?.headers ?? {}) } });
+  const res = await fetch(`/api/${path}`, { ...init, headers: { accept: "application/json", ...(await authHeaders()), ...(init?.headers ?? {}) } });
   const text = await res.text();
   let body: unknown = null;
   try {

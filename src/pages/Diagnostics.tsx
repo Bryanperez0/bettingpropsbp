@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Card, ErrorState, PageHeader, Spinner } from "../components/ui";
+import { authHeaders } from "../auth/supabase";
 
 interface Check { name: string; ok: boolean; status: string; detail: string; ms: number }
 
@@ -7,7 +8,7 @@ export default function Diagnostics() {
   const q = useQuery({
     queryKey: ["diagnostics"],
     queryFn: async () => {
-      const res = await fetch("/api/diagnostics");
+      const res = await fetch("/api/diagnostics", { headers: await authHeaders() });
       if (!res.ok) throw new Error(`Diagnostics endpoint returned HTTP ${res.status}`);
       return (await res.json()) as { checkedAt: string; checks: Check[] };
     },
