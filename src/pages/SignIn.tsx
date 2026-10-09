@@ -19,12 +19,13 @@ export default function SignIn() {
   const [mode, setMode] = useState<Mode>(recovery ? "reset" : "signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const view = VIEWS[recovery ? "reset" : mode];
   const current: Mode = recovery ? "reset" : mode;
 
-  const go = (m: Mode) => { setMode(m); setPassword(""); setMsg(null); };
+  const go = (m: Mode) => { setMode(m); setPassword(""); setShowPassword(false); setMsg(null); };
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -77,10 +78,32 @@ export default function SignIn() {
             </label>
           )}
           {view.password && (
-            <label className="mt-4 block text-sm font-medium text-ink-2">
-              {current === "reset" ? "New password" : "Password"}
-              <input type="password" autoComplete={current === "signin" ? "current-password" : "new-password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 6 characters" className={inputCls} />
-            </label>
+            <div className="mt-4">
+              <label htmlFor="password" className="block text-sm font-medium text-ink-2">
+                {current === "reset" ? "New password" : "Password"}
+              </label>
+              <div className="relative">
+                <input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete={current === "signin" ? "current-password" : "new-password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="At least 6 characters"
+                  className={`${inputCls} pr-16`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-pressed={showPassword}
+                  aria-controls="password"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  className="absolute inset-y-0 right-0 mt-1 rounded-r-lg px-3 text-xs font-semibold text-ink-3 hover:text-ink focus-visible:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-over"
+                >
+                  {showPassword ? "Hide" : "Show"}
+                </button>
+              </div>
+            </div>
           )}
           <button type="submit" disabled={busy} className="mt-5 w-full rounded-lg bg-over px-3 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">
             {busy ? "Please wait…" : view.button}
