@@ -1,3 +1,4 @@
+import { MODEL_WEIGHT } from "../../shared/model/calibration";
 import { MARKET_LIST } from "../../shared/model/markets";
 import { Card, PageHeader, Section } from "../components/ui";
 import { Disclaimer } from "../components/Disclaimer";
@@ -40,6 +41,7 @@ export default function Methodology() {
           <P>Small, capped adjustments (all shown in each prop's calculation table): <b className="text-ink">game script</b> from the spread (favorites run slightly more, underdogs pass slightly more, max ±6%), <b className="text-ink">weather</b> for outdoor games only (wind ≥ 15 mph cuts passing efficiency 1% per mph over 12, max 12%; precipitation ≥ 60% −3%; ≤ 20°F −2%), <b className="text-ink">home/away</b> splits (max ±5%, needs 2+ games each), and <b className="text-ink">injuries</b>.</P>
           <P><b className="text-ink">Injuries.</b> Players listed Out/IR are excluded. When a teammate who held ≥ 12% of team targets or carries is out, the model compares the player's volume in games with and without that teammate, and only adjusts if there are at least 2 games of each. Otherwise it lists the absence as a risk and makes no assumption. If a team's primary QB is out, pass-catcher and rushing props get a flagged −6 confidence penalty because the history was built with a different QB.</P>
           <P><b className="text-ink">Over or Under.</b> The model converts the projection into a probability distribution (normal for yardage and counts, Poisson for pass TDs) and picks the side with the larger edge versus the market's no-vig probability.</P>
+          <P><b className="text-ink">Blended with the market.</b> Tracked results showed the raw projection was overconfident: its picks averaged a 68% win chance and actually hit about 51%. So every probability is now pulled most of the way toward the sportsbook's no-vig price, keeping {Math.round(MODEL_WEIGHT * 100)}% of the model's disagreement (fit to graded picks). Edges are smaller and rarer as a result, which is the honest picture. Each prop page still shows the raw projection's number for reference.</P>
         </Card>
       </Section>
 

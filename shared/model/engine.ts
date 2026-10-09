@@ -5,6 +5,7 @@ import { project, type TeammateOut } from "./projection";
 import { buildHistory, computeHitRates } from "./hitRate";
 import { scoreConfidence, tierFor, DEFAULT_IMPLIED } from "./confidence";
 import { americanToProb, clamp, mean, median, noVig, normalCdf, poissonCdf, round, unitsWon } from "./stats";
+import { calibrate } from "./calibration";
 
 export interface AnalyzeInput {
   line: PropLineGroup;
@@ -91,8 +92,8 @@ export function analyzeProp(input: AnalyzeInput): AnalyzedProp | null {
   const probs = outcomeProbs(input.line.market, proj.mean, proj.sd, line);
   // Condition on no push so probabilities compare cleanly with a two-way price.
   const noPush = (p: number) => (probs.push > 0 ? p / (1 - probs.push) : p);
-  const pOver = noPush(probs.over);
-  const pUnder = noPush(probs.under);
+  const rawOver = noPush(probs.over);
+  const rawUnder = noPush(probs.under);
 
   // Market probability for each side: no-vig when both prices exist.
   const nv = noVig(input.line.overPrice, input.line.underPrice);
@@ -100,6 +101,11 @@ export function analyzeProp(input: AnalyzeInput): AnalyzedProp | null {
   let impliedUnder: number | null = nv ? nv[1] : americanToProb(input.line.underPrice);
   if (input.line.market === "anytime_td" && impliedUnder === null && impliedOver !== null) impliedUnder = 1 - impliedOver;
   if (input.line.market === "anytime_td" && impliedOver === null && impliedUnder !== null) impliedOver = 1 - impliedUnder;
+
+  // The raw model is overconfident, so its probability is pulled most of the
+  // way toward the market's (see calibration.ts). Both sides stay summing to 1.
+  const pOver = calibrate(rawOver, impliedOver);
+  const pUnder = calibrate(rawUnder, impliedUnder);
 
   // Pick the side with the larger edge vs the market. Without prices, the
   // more likely side wins (identical to projection vs line for O/U props).
@@ -110,6 +116,7 @@ export function analyzeProp(input: AnalyzeInput): AnalyzedProp | null {
   else if (impliedOver !== null && impliedUnder !== null) side = pOver - impliedOver >= pUnder - impliedUnder ? "over" : "under";
   else side = pOver >= pUnder ? "over" : "under";
   const modelProb = side === "over" ? pOver : pUnder;
+  const rawModelProb = side === "over" ? rawOver : rawUnder;
   const impliedProb = side === "over" ? impliedOver : impliedUnder;
   const sidePrice = side === "over" ? input.line.overPrice : input.line.underPrice;
   const probEdge = modelProb - (impliedProb ?? DEFAULT_IMPLIED);
@@ -192,7 +199,7 @@ export function analyzeProp(input: AnalyzeInput): AnalyzedProp | null {
   if (hitRates.season.pct !== null && hitRates.season.pct < 0.4 && hitRates.season.total >= 3) risks.push(`Only ${hitRates.season.hits}/${hitRates.season.total} this season at this line`);
 
   const explanation = buildExplanation({
-    name: input.player.name, statName, side, line, projection, isProb, modelProb, impliedProb,
+    name: input.player.name, statName, side, line, projection, isProb, modelProb, rawModelProb, impliedProb,
     matchupFactor: m, env: environment, volume: proj.volume, confidence: confidence.total, sample: proj.sample,
   });
 
@@ -224,6 +231,7 @@ export function analyzeProp(input: AnalyzeInput): AnalyzedProp | null {
     edge: round(edge, isProb ? 3 : 1),
     edgePct: edgePct === null ? null : round(edgePct, 3),
     modelProb: round(modelProb, 3),
+    rawModelProb: round(rawModelProb, 3),
     impliedProb: impliedProb === null ? null : round(impliedProb, 3),
     probEdge: round(probEdge, 3),
     confidence,
@@ -268,8 +276,11 @@ export function shopBooks(line: PropLineGroup, side: PropSide, mu: number, sd: n
     const at = line.market === "anytime_td" ? 0.5 : b.line;
     if (price === null || at === null) continue;
     const pr = outcomeProbs(line.market, mu, sd, at);
-    const win = side === "over" ? pr.over : pr.under;
-    const lose = side === "over" ? pr.under : pr.over;
+    const decided = pr.over + pr.under || 1;
+    const nv = noVig(b.overPrice, b.underPrice);
+    const market = nv ? nv[side === "over" ? 0 : 1] : americanToProb(price);
+    const win = calibrate((side === "over" ? pr.over : pr.under) / decided, market) * (1 - pr.push);
+    const lose = 1 - pr.push - win;
     out.push({ book: b.book, bookTitle: b.bookTitle, line: at, price, winProb: round(win, 3), ev: round(win * unitsWon(price) - lose, 3) });
   }
   return out.sort((a, b) => b.ev - a.ev || a.bookTitle.localeCompare(b.bookTitle));
@@ -292,7 +303,7 @@ export function propId(gameId: string, playerName: string, market: string): stri
 
 function buildExplanation(a: {
   name: string; statName: string; side: PropSide; line: number; projection: number; isProb: boolean;
-  modelProb: number; impliedProb: number | null; matchupFactor: number; env: number;
+  modelProb: number; rawModelProb: number; impliedProb: number | null; matchupFactor: number; env: number;
   volume: AnalyzedProp["volume"]; confidence: number; sample: { current: number; prior: number };
 }): string {
   const parts: string[] = [];
@@ -300,6 +311,9 @@ function buildExplanation(a: {
     parts.push(`The model gives ${a.name} a ${fmt(a.projection * 100)}% chance to score (${a.side === "over" ? "Yes" : "No"} side ${fmt(a.modelProb * 100)}%${a.impliedProb !== null ? ` vs ${fmt(a.impliedProb * 100)}% implied by the odds` : ""}).`);
   } else {
     parts.push(`The model projects ${a.name} for ${fmt(a.projection)} ${a.statName} against a line of ${a.line}, which makes the ${a.side} a ${fmt(a.modelProb * 100)}% outcome${a.impliedProb !== null ? ` vs ${fmt(a.impliedProb * 100)}% implied by the price` : ""}.`);
+  }
+  if (Math.abs(a.rawModelProb - a.modelProb) >= 0.005) {
+    parts.push(`The raw projection alone says ${fmt(a.rawModelProb * 100)}%; that is blended with the market because the raw model has been overconfident in tracked results.`);
   }
   const drivers: string[] = [];
   if (a.volume.projected !== null && a.volume.season !== null && a.volume.season > 0) {

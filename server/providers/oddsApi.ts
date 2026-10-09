@@ -3,6 +3,7 @@
  * Player props are only available one event at a time from the event-odds
  * endpoint; each call costs (markets returned x regions) credits.
  */
+import { isValidAmericanOdds } from "../../shared/model/stats";
 import type { BookLine, PropMarket } from "../../shared/types";
 import { marketFromOddsKey } from "../../shared/model/markets";
 import { fetchJson } from "../http";
@@ -79,8 +80,9 @@ export function parseEventProps(data: RawEventOdds): RawPropQuote[] {
         const key = `${player}|${point ?? ""}`;
         const g = groups.get(key) ?? { player, point, over: null, under: null };
         const name = o.name.toLowerCase();
-        if (name === "over" || name === "yes") g.over = o.price;
-        else if (name === "under" || name === "no") g.under = o.price;
+        const p = isValidAmericanOdds(o.price) ? o.price : null;
+        if (name === "over" || name === "yes") g.over = p;
+        else if (name === "under" || name === "no") g.under = p;
         groups.set(key, g);
       }
       for (const g of groups.values()) {

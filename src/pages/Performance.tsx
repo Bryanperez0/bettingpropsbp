@@ -94,6 +94,11 @@ export default function Performance() {
         <DownloadPicks />
       </PageHeader>
       <Warnings warnings={q.data.warnings} />
+      {!!s.excludedInvalidOdds && (
+        <p className="mb-4 text-xs text-ink-3">
+          {s.excludedInvalidOdds} saved pick{s.excludedInvalidOdds === 1 ? " is" : "s are"} left out of these numbers because the odds feed sent an impossible price (like -1) when it was saved. The CSV download still includes them.
+        </p>
+      )}
       <div className="mb-8 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
         <Stat label="Tracked picks" value={s.total} />
         <Stat label="Graded" value={s.graded} />

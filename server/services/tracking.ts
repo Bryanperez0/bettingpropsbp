@@ -1,7 +1,7 @@
 import type { AnalyzedProp, ClosingLine, ClvSummary, PerformanceBucket, PerformanceSummary, SeasonDataset, TrackedPick } from "../../shared/types";
 import { MARKETS } from "../../shared/model/markets";
 import { isActionable } from "../../shared/model/engine";
-import { americanToProb, mean, noVig, round, unitsWon } from "../../shared/model/stats";
+import { americanToProb, isValidAmericanOdds, mean, noVig, round, unitsWon } from "../../shared/model/stats";
 import { normName } from "../../shared/names";
 import { readJSON, writeJSON } from "../cache";
 
@@ -137,7 +137,10 @@ function bucket(key: string, label: string, picks: TrackedPick[]): PerformanceBu
 
 export const CONFIDENCE_RANGES: [number, number][] = [[90, 100], [80, 89], [70, 79], [60, 69], [50, 59]];
 
-export function summarize(ledger: TrackedPick[]): PerformanceSummary {
+export function summarize(fullLedger: TrackedPick[]): PerformanceSummary {
+  // Picks saved with impossible odds (a feed bug, e.g. "-1") would count a win
+  // as +100 units, so they are left out of every number on this page.
+  const ledger = fullLedger.filter((p) => p.odds === null || isValidAmericanOdds(p.odds));
   const all = bucket("all", "All", ledger);
   const group = (keyOf: (p: TrackedPick) => string, labelOf: (k: string) => string = (k) => k) => {
     const m = new Map<string, TrackedPick[]>();
@@ -146,6 +149,7 @@ export function summarize(ledger: TrackedPick[]): PerformanceSummary {
   };
   return {
     total: ledger.length,
+    excludedInvalidOdds: fullLedger.length - ledger.length,
     graded: all.wins + all.losses + all.pushes,
     pending: ledger.filter((p) => p.result === "pending").length,
     wins: all.wins,

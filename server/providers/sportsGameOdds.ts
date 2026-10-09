@@ -4,6 +4,7 @@
  * per market, so one request returns every player prop for every game in the
  * window. The key is sent in the x-api-key header, never in a URL.
  */
+import { isValidAmericanOdds } from "../../shared/model/stats";
 import type { PropMarket } from "../../shared/types";
 import { fetchJson } from "../http";
 import type { RawPropQuote } from "./oddsApi";
@@ -80,6 +81,11 @@ const price = (s: string | undefined) => {
   const n = Number(s);
   return s !== undefined && s !== "" && Number.isFinite(n) ? n : null;
 };
+/** Like price(), but also drops impossible American odds (e.g. "-1"). */
+const oddsPrice = (s: string | undefined) => {
+  const n = price(s);
+  return isValidAmericanOdds(n) ? n : null;
+};
 
 /** Names a team can go by, used to match SportsGameOdds events to ESPN games. */
 function teamNames(t: SgoTeam | undefined): string[] {
@@ -116,16 +122,16 @@ export function parseSgoEvent(ev: SgoEvent, mode: "current" | "closing" = "curre
       const odds = closing ? b.closeOdds : b.odds;
       const line = market === "anytime_td" ? null : price(closing ? b.closeOverUnder : b.overUnder);
       if (market !== "anytime_td" && line === null) continue;
-      if (price(odds) === null) continue;
+      if (oddsPrice(odds) === null) continue;
       const key = `${player}|${market}|${bookId}|${line ?? ""}`;
       const g = books.get(key) ?? { playerName, market, book: bookId, line, over: null, under: null, lastUpdate: null, openLine: null, openOver: null, openUnder: null, hasOpen: false };
-      if (isOver) g.over = price(odds);
-      else g.under = price(odds);
-      if (!closing && price(b.openOdds) !== null) {
+      if (isOver) g.over = oddsPrice(odds);
+      else g.under = oddsPrice(odds);
+      if (!closing && oddsPrice(b.openOdds) !== null) {
         g.hasOpen = true;
         if (market !== "anytime_td") g.openLine = price(b.openOverUnder);
-        if (isOver) g.openOver = price(b.openOdds);
-        else g.openUnder = price(b.openOdds);
+        if (isOver) g.openOver = oddsPrice(b.openOdds);
+        else g.openUnder = oddsPrice(b.openOdds);
       }
       if (b.lastUpdatedAt && (!g.lastUpdate || b.lastUpdatedAt > g.lastUpdate)) g.lastUpdate = b.lastUpdatedAt;
       books.set(key, g);

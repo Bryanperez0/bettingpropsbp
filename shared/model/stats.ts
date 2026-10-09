@@ -60,9 +60,18 @@ export function poissonCdf(k: number, lambda: number): number {
   return Math.min(1, total);
 }
 
-/** American odds -> implied probability (includes the book's vig). */
+/**
+ * Real American odds are -100 or below, or +100 or above. Feeds have sent
+ * values like -1 or -6, which would read as near-certain prices and huge
+ * payouts, so anything in between is rejected.
+ */
+export function isValidAmericanOdds(price: number | null | undefined): price is number {
+  return typeof price === "number" && Number.isFinite(price) && Math.abs(price) >= 100;
+}
+
+/** American odds -> implied probability (includes the book's vig). Null for invalid odds. */
 export function americanToProb(price: number | null | undefined): number | null {
-  if (price === null || price === undefined || !Number.isFinite(price) || price === 0) return null;
+  if (!isValidAmericanOdds(price)) return null;
   return price > 0 ? 100 / (price + 100) : -price / (-price + 100);
 }
 

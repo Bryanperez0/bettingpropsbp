@@ -13,6 +13,14 @@ import { readHistory } from "../server/services/history";
 import { readJSON, writeJSON } from "../server/cache";
 import type { AnalysisSnapshot } from "../server/services/analysis";
 
+// These tests cover pipeline mechanics (freezing, pick logging, closing
+// lines), not calibration. The fixture week yields no picks once
+// probabilities are blended with the market, so they run on the raw model.
+vi.mock("../shared/model/calibration", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../shared/model/calibration")>();
+  return { ...real, calibrate: (m: number, q: number | null) => real.calibrate(m, q, 1) };
+});
+
 const fx = (f: string) => JSON.parse(readFileSync(join(__dirname, "fixtures", f), "utf8"));
 const ok = (body: unknown, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json", ...headers } });
 const notFound = () => new Response("not found", { status: 404 });

@@ -359,6 +359,8 @@ export interface AnalyzedProp {
   edge: number;
   edgePct: number | null;
   modelProb: number;
+  /** The projection's probability before blending with the market (see calibration.ts). */
+  rawModelProb?: number;
   impliedProb: number | null;
   probEdge: number;
   confidence: ConfidenceBreakdown;
@@ -495,6 +497,8 @@ export interface PerformanceBucket {
 
 export interface PerformanceSummary {
   total: number;
+  /** Stored picks left out of every number because their odds were impossible (feed bug). */
+  excludedInvalidOdds?: number;
   graded: number;
   pending: number;
   wins: number;
