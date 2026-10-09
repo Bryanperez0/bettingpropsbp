@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isSignedIn } from "../server/auth";
 import { handle } from "../server/respond";
+import picksExport from "../netlify/functions/picks-export";
 
 const req = (headers: Record<string, string> = {}) => new Request("https://example.test/api/props", { headers });
 
@@ -20,5 +21,10 @@ describe("API sign-in check", () => {
     expect(res.status).toBe(401);
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect(ran).toBe(false);
+  });
+
+  it("the picks CSV export is blocked when signed out", async () => {
+    const res = await picksExport(new Request("https://example.test/api/picks-export"), {});
+    expect(res.status).toBe(401);
   });
 });

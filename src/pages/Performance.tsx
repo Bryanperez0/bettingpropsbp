@@ -5,6 +5,8 @@ import { Warnings } from "../components/Freshness";
 import { Card, Empty, ErrorState, PageHeader, Pill, Section, Spinner, Stat } from "../components/ui";
 import { SideBadge } from "../components/PropParts";
 import { fmtFixed, fmtOdds, fmtPct, fmtSigned, fmtTime } from "../utils/format";
+import { useState } from "react";
+import { authHeaders } from "../auth/supabase";
 
 const BREAKEVEN = 110 / 210; // hit rate needed at -110
 
@@ -47,6 +49,38 @@ const resultTone: Record<TrackedPick["result"], string> = {
   win: "bg-strong/15 text-strong", loss: "bg-negative/15 text-negative", push: "bg-surface-3 text-ink-2", pending: "bg-moderate/10 text-moderate", void: "bg-surface-3 text-ink-3",
 };
 
+/** Downloads every tracked pick as a CSV file (same sign-in as the rest of the API). */
+function DownloadPicks() {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function download() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await fetch("/api/picks-export", { headers: await authHeaders() });
+      if (!res.ok) throw new Error(res.status === 401 ? "Your session ended. Sign in again." : `Download failed (HTTP ${res.status})`);
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `prop-lab-picks-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <button onClick={download} disabled={busy} className="rounded-lg border border-line px-3 py-1.5 text-sm font-medium text-ink-2 hover:border-ink-3 hover:text-ink disabled:opacity-50">
+        {busy ? "Preparing…" : "Download all picks (CSV)"}
+      </button>
+      {err && <span className="text-xs text-negative">{err}</span>}
+    </div>
+  );
+}
+
 export default function Performance() {
   const q = usePerformance();
   if (q.isLoading) return <Spinner label="Loading model performance" />;
@@ -56,7 +90,9 @@ export default function Performance() {
 
   return (
     <div>
-      <PageHeader title="Model Performance" subtitle={`Every sportsbook-line recommendation with confidence ≥ ${trackMinConfidence} and a positive edge is saved the first time it appears, with its line, odds, projection and confidence at that moment. Stored picks are never edited when lines move. After games finish, results are graded from the final box score.`} />
+      <PageHeader title="Model Performance" subtitle={`Every sportsbook-line recommendation with confidence ≥ ${trackMinConfidence} and a positive edge is saved the first time it appears, with its line, odds, projection and confidence at that moment. Stored picks are never edited when lines move. After games finish, results are graded from the final box score.`}>
+        <DownloadPicks />
+      </PageHeader>
       <Warnings warnings={q.data.warnings} />
       <div className="mb-8 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
         <Stat label="Tracked picks" value={s.total} />
