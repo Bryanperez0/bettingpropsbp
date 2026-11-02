@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { supabase } from "../auth/supabase";
 import { useAuth } from "../auth/AuthProvider";
 
@@ -25,13 +25,26 @@ export default function SignIn() {
   const view = VIEWS[recovery ? "reset" : mode];
   const current: Mode = recovery ? "reset" : mode;
 
+  // Pressing Back from Google restores this page from the browser's cache with
+  // the button still disabled. Re-enable it.
+  useEffect(() => {
+    const onShow = (e: PageTransitionEvent) => { if (e.persisted) setBusy(false); };
+    window.addEventListener("pageshow", onShow);
+    return () => window.removeEventListener("pageshow", onShow);
+  }, []);
+
   const go = (m: Mode) => { setMode(m); setPassword(""); setShowPassword(false); setMsg(null); };
 
   async function google() {
     setMsg(null);
     setBusy(true);
-    // Supabase sends the user to Google, then back to the exact page they were on.
-    const { error } = await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.href } });
+    // Supabase sends the user to Google, then back to the page they were on.
+    // Leave out the #fragment: after a sign-in, Supabase clears its tokens by
+    // setting the hash to "", which leaves a trailing "#". Sending that along
+    // makes the next callback "...##access_token=…", which can't be read, so
+    // the user silently lands back on this screen.
+    const { origin, pathname, search } = window.location;
+    const { error } = await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: origin + pathname + search } });
     if (error) { setMsg({ text: error.message || "Could not start Google sign-in.", ok: false }); setBusy(false); }
   }
 
