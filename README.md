@@ -94,11 +94,13 @@ API endpoints read the snapshot, so pages load fast and provider calls stay low.
 
 ## Sign-in
 
-The whole app is behind an email + password login handled by Supabase Auth (project `gtozixctuyvzxoliodfq`). Visitors can create an account, sign in, and reset a forgotten password by email.
+The whole app is behind a login (email + password, or Google) handled by Supabase Auth (project `gtozixctuyvzxoliodfq`). Visitors can create an account, sign in, and reset a forgotten password by email.
 
 - The project URL and publishable key live in `shared/supabase.ts`. The publishable key is meant to be public, so it is safe in browser code.
 - Every `/api/*` function checks the visitor's Supabase session token (`server/auth.ts`, called from `handle()` in `server/respond.ts` and from `diagnostics.ts`). Without a valid token it returns 401, so the data can't be pulled without signing in. The scheduled refresh is not affected.
 - API responses are sent with `Cache-Control: private, no-store` so Netlify's CDN never hands a signed-in response to a signed-out visitor.
+- **Continue with Google** uses `signInWithOAuth({ provider: "google" })` and returns the visitor to the page they were on. It needs the Google provider turned on in Supabase (**Authentication → Sign In / Providers → Google**, with a Google Cloud OAuth client ID and secret). Because the return address is the current page, the Redirect URLs list should use wildcards, e.g. `https://your-site.netlify.app/**` and `http://localhost:5173/**`.
+- When signed in, the header shows the name and profile picture from the user's `user_metadata` (filled in by Google). Email accounts fall back to the email address.
 - In Supabase, **Authentication → URL Configuration** must list the site's address as the Site URL and as a Redirect URL, or confirmation and reset emails will link to the wrong place.
 
 ## Environment variables

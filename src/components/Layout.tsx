@@ -46,9 +46,17 @@ function RefreshButton() {
 
 function Account() {
   const { user } = useAuth();
+  // Google fills these in; email sign-ups usually have none, so fall back to the email.
+  const meta = user?.user_metadata ?? {};
+  const name: string | undefined = meta.full_name || meta.name;
+  const avatar: string | undefined = meta.avatar_url || meta.picture;
+  const label = name || user?.email;
   return (
     <div className="flex min-w-0 items-center gap-2 text-xs text-ink-3">
-      <span className="hidden max-w-48 truncate md:inline" title={user?.email}>{user?.email}</span>
+      {avatar && (
+        <img src={avatar} alt="" referrerPolicy="no-referrer" className="h-7 w-7 shrink-0 rounded-full border border-line object-cover" />
+      )}
+      <span className="hidden max-w-48 truncate font-medium text-ink-2 md:inline" title={user?.email}>{label}</span>
       <button
         onClick={() => supabase.auth.signOut()}
         className="rounded-lg border border-line px-2.5 py-1 font-medium text-ink-2 hover:border-ink-3 hover:text-ink"
